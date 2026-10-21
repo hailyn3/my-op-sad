@@ -1,9 +1,0 @@
-170:            $link = Str::of($link)->replace("{" . $token . "}", data_get($row, $token))->toString();
-209:        $value = data_get($row, $this->$key);
-305:                                        # Scoped slot`s name like `user.city` are compiled to `user___city` through `@scope / @endscope`.
-349:                                                value="{{ data_get($row, $selectableKey) }}"
-358:                                            @if(data_get($row, $expandableCondition))
-374:                                            # Scoped slot`s name like `user.city` are compiled to `user___city` through `@scope / @endscope`.
-380:                                        @if(isset(${"cell_".$temp_key}))
-386:                                                {{ ${"cell_".$temp_key}($fluent ? fluent($row) : $row) }}
-398:                                                {{ $format($row, data_get($row, $header['key']), $header) }}

@@ -1,9 +1,0 @@
----
-2869c19d fix(#1057): keep in-scope trashed actors in activity reports
- phpstan-baseline.neon                              | 12 ----
- .../views/livewire/activity-log/index.blade.php    | 51 ++++++++++------
- resources/views/livewire/dashboard.blade.php       | 48 +++++++++------
- tests/Feature/ActivityLogPageLivewireTest.php      | 70 ++++++++++++++++++++++
- tests/Feature/DashboardPageTest.php                | 61 +++++++++++++++++++
- 5 files changed, 194 insertions(+), 48 deletions(-)
---- working tree diff vs HEAD ---

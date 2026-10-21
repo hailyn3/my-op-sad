@@ -1,5 +1,0 @@
-{"tool":"pint","result":"passed"} M phpstan-baseline.neon
- M resources/views/livewire/activity-log/index.blade.php
- M resources/views/livewire/dashboard.blade.php
- M tests/Feature/ActivityLogPageLivewireTest.php
- M tests/Feature/DashboardPageTest.php

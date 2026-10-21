@@ -1,8 +1,0 @@
-{"base":"beta","head":"fix/1057-trashed-actor-labels","mergeable":"MERGEABLE","number":1216,"owner":"hailyn3","url":"https://github.com/asgarimehdi/h-dashboard/pull/1216"}
-Code Style (Pint)	pending	0	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062073	
-PHP 8.6 Preview (non-blocking)	pending	0	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062071	
-Tests & Coverage	pending	0	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062154	
-Typecheck (Playwright specs, informational)	pass	11s	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062330	
-E2E Tests (Playwright)	pending	0	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387061751	
-PHPStan Static Analysis	pending	0	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062221	
-Mutation Testing	skipping	0	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387064800	

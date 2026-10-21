@@ -1,0 +1,12 @@
+beta now: e7c5151d
+branch base: e7c5151d
+ahead: 1 behind: 0
+=== PR diff stat ===
+ resources/css/app.css                            | 23 ++++++------
+ resources/views/components/layouts/app.blade.php | 18 +---------
+ tests/Feature/LayoutHeadTest.php                 | 45 ++++++++++++++++++++++++
+ 3 files changed, 56 insertions(+), 30 deletions(-)
+=== files ===
+resources/css/app.css
+resources/views/components/layouts/app.blade.php
+tests/Feature/LayoutHeadTest.php

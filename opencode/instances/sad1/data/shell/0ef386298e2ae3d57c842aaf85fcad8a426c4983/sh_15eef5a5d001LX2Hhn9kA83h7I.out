@@ -1,0 +1,30 @@
+- `tests/Feature/LayoutHeadTest.php`: قفل روی `GET /` (لاگین‌شده) و `GET /login` — حضور preload/مسیر فونت، نبود `@font-face` اینلاین و نبود `/public/fonts/`.
+
+## رکورد درست (با تصحیح‌های کارشناس)
+
+- تکراری واقعی، «دو مدخل manifest» نبود: اصل‌های `public/fonts` به‌علاوهٔ دو کپی هش‌دار Vite در `build/assets` بود (~۱۰۱٫۷KB در خروجی بیلد). manifest فقط مسیر مبدأ را کنار فایل خروجی نگه می‌داشت.
+- امروز صفحهٔ لاگین از خانوادهٔ `"Vazir"` در app.css بولد واقعی می‌گرفت، ولی shell اپ با `!important` اینلاین و فقط وزن ۴۰۰ بولد synthetic می‌ساخت؛ همین ناهمخوانی رفع شد.
+- `format("truetype")` روی woff2 یک نادرستی مشخصاتی بود، نه شکست لود در Chromium.
+- `layouts/auth.blade.php` ویرایش نشد؛ فقط اثر جانبی‌اش یکدست شدن همان گلیف‌ها با خانوادهٔ واحد است.
+
+## اثبات
+
+- `composer test`: **2664 passed**، ۲ risky. تنها failure محلی `AppKeyGuardWiringTest` است که به `.git/index` واقعی نیاز دارد و در worktree (فایل `.git`) وجود ندارد؛ روی clone معمولی/CI سبز است و به این تغییر مربوط نیست.
+- `vendor/bin/pint --dirty`: passed.
+- `composer phpstan` (با vendor قفل‌شده): **No errors**؛ `phpstan-baseline.neon` صفر مدخل تازه.
+- گارد بیلد پس از `npm run build`:
+  - `find public/build/assets -name 'Vazirmatn-*.woff2'` → صفر
+  - `grep -c Vazirmatn public/build/manifest.json` → صفر
+  - CSS خروجی دو face با `format("woff2")` و `font-display:swap` دارد و هیچ `Instrument Sans`/`font-family:Vazir` ندارد.
+
+## چک بصری (Chromium/Playwright، روی بیلد production)
+
+- `/login`: خانوادهٔ مؤثر body = `Vazirmatn, ui-sans-serif, system-ui, sans-serif`؛ هر دو face (۴۰۰ و ۷۰۰) `document.fonts.check` → loaded؛ هیچ `@font-face` اینلاین در `<style>`ها نیست.
+- `/dashboard` (پس از ورود): preload فونت Regular در `<head>` حاضر است؛ headingها وزن ۷۰۰ و خانوادهٔ `Vazirmatn` دارند (بولد واقعی، نه synthetic)؛ هر دو فایل از `/fonts/` لود می‌شوند.
+- `/maps/route`: پنل `.leaflet-routing-alt` خانوادهٔ `Vazirmatn, sans-serif` می‌گیرد (نه `Vazir`).
+- اسکرین‌شات‌های `login`، `dashboard` و پنل routing در محیط محلی گرفته شد؛ متن فارسی بدون تغییر محسوس و headingها با بولد واقعی رندر شدند.
+
+
+پروژه هنوز deploy نشده؛ اثر امروز فقط محیط توسعه/بیلد است. خروجی بیلد ~۱۰۱٫۷KB سبک‌تر می‌شود، هر پاسخ HTML یک `<style>` کوچک‌تر و یک preload جدید دارد، و با `font-display: swap` ممکن است شکست خط در جاهایی که با بولد synthetic چیده شده بودند کمی جابه‌جا شود — چک بصری لاگین و headingها انجام شد.
+
+Closes #1184

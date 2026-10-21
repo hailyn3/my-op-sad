@@ -1,0 +1,191 @@
+/**
+ * Global setup — runs once before the entire Playwright suite.
+ *
+ * 1. Backs up .env → .env.dev.bak, copies .env.e2e → .env
+ * 2. Runs migrate:fresh --seed on the E2E database
+ * 3. Creates a dedicated password-mutation user
+ * 4. Writes .run-state.json for test fixtures
+ *
+ * NOTE: The artisan serve process must be started SEPARATELY before running
+ * playwright. This setup only prepares the database and config.
+ */
+import { execSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const PROJECT_ROOT = process.cwd();
+const ENV_PATH = path.join(PROJECT_ROOT, '.env');
+const ENV_DEV_BAK = path.join(PROJECT_ROOT, '.env.dev.bak');
+const ENV_E2E = path.join(PROJECT_ROOT, '.env.e2e');
+const RUN_STATE_PATH = path.join(PROJECT_ROOT, 'tests', 'e2e', '.run-state.json');
+const CREATE_PWD_USER = path.join(PROJECT_ROOT, 'tests', 'e2e', 'create-pwd-user.php');
+
+export default async function globalSetup() {
+  if (!process.env.TEST_PASSWORD) {
+    throw new Error('TEST_PASSWORD env var is required. Set it in .env.e2e');
+  }
+
+  const runId = Date.now().toString(36);
+  const pwdNCode = '9' + Date.now().toString().slice(-9);
+  const unitName = `E2E-${runId}`;
+
+  // 1. Swap .env
+  if (fs.existsSync(ENV_PATH) && !fs.existsSync(ENV_DEV_BAK)) {
+    fs.copyFileSync(ENV_PATH, ENV_DEV_BAK);
+  }
+  fs.copyFileSync(ENV_E2E, ENV_PATH);
+  console.log('[global-setup] Swapped .env → .env.dev.bak, .env.e2e → .env');
+
+  // 2. Fresh database + seed
+  console.log(`[global-setup] runId=${runId} — migrating and seeding...`);
+  execSync('php artisan config:clear && php artisan route:clear', {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+  });
+  execSync('php artisan migrate:fresh --seed --force', {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+  });
+
+  // 3. Create dedicated password-mutation user
+  console.log(`[global-setup] Creating password-mutation user ${pwdNCode}...`);
+  execSync(`php ${CREATE_PWD_USER} ${pwdNCode} ${process.env.TEST_PASSWORD} "${unitName}"`, {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+  });
+
+  // 4. Write run state
+  const state = { runId, pwdNCode };
+  fs.writeFileSync(RUN_STATE_PATH, JSON.stringify(state, null, 2));
+  console.log(`[global-setup] Run state: ${JSON.stringify(state)}`);
+}
+=== example e2e env ===
+APP_ENV=local
+# APP_LOCALE=fa is MANDATORY: e2e specs assert Persian pagination/validation text.
+# Without it Laravel falls back to `en` and 11 tests fail (Showing… / English validation messages).
+APP_LOCALE=fa
+APP_FALLBACK_LOCALE=en
+APP_FAKER_LOCALE=en_US
+APP_KEY=
+APP_NAME=h-dashboard
+APP_URL=http://localhost:8001
+
+# ── Trusted proxies (#855) ──
+# Leave EMPTY for a direct nginx+FPM deployment — nothing is trusted, so a
+# client-supplied X-Forwarded-Host/Proto/Port/Prefix is ignored.
+# If a proxy (Cloudflare, a load balancer) IS in front of the app, pin its
+# CIDR ranges here, comma-separated, e.g.:
+#   TRUSTED_PROXIES=173.245.48.0/20,103.21.244.0/22
+# Then run `php artisan config:clear` (or `optimize`): a cached config freezes
+# this value at boot, so editing .env alone has no effect.
+TRUSTED_PROXIES=
+# Hostnames this app answers for, comma-separated. Used as the trustHosts()
+# allowlist that makes a wrong TRUSTED_PROXIES fail closed. Defaults to APP_URL
+# when left empty — set it explicitly in production if you serve other names.
+TRUSTED_HOSTS=
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=h_dashboard_e2e
+DB_USERNAME=<same as dev>
+DB_PASSWORD=
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=<same as dev>
+CACHE_STORE=array
+SESSION_DRIVER=file
+QUEUE_CONNECTION=sync
+# e2e runs on plaintext http://localhost:8001 — explicit carve-out (#1003) so the
+# Secure flag does not depend on the browser's localhost exception.
+SESSION_SECURE_COOKIE=false
+CACHE_PREFIX=h_dashboard_e2e
+TEST_PASSWORD=12345678
+TEST_N_CODE=4411015056
+TEST_UNIT_MANAGER_N_CODE=6275537615
+TEST_EXPERT_N_CODE=0023548258
+TEST_REGULAR_USER_N_CODE=0041368464
+BASE_URL=http://localhost:8001
+=== seeder users ===
+14:     * The three accounts seeded here all share one trivial literal password,
+32:                .'publicly-known password. Provision an administrator out of band instead. '
+39:                'n_code' => '4411015056',
+40:                'password' => Hash::make('12345678'),
+45:                'n_code' => '4400176134',
+46:                'password' => Hash::make('12345678'),
+51:                'n_code' => '4400176143',
+52:                'password' => Hash::make('12345678'),
+=== create-pwd-user ===
+<?php
+
+/**
+ * Create a dedicated password-mutation user for E2E tests.
+ * Usage: php tests/e2e/create-pwd-user.php <n_code> <password> <unit_name>
+ */
+
+use App\Models\User;
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+
+require __DIR__.'/../../vendor/autoload.php';
+$app = require_once __DIR__.'/../../bootstrap/app.php';
+$app->make(Kernel::class)->bootstrap();
+
+$nCode = $argv[1] ?? null;
+$password = $argv[2] ?? null;
+$unitName = $argv[3] ?? null;
+
+if (! $nCode || ! $password || ! $unitName) {
+    echo 'Usage: php create-pwd-user.php <n_code> <password> <unit_name>'."\n";
+    exit(1);
+}
+
+DB::beginTransaction();
+try {
+    DB::table('units')->insert([
+        'name' => $unitName,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $unitId = DB::getPdo()->lastInsertId();
+
+    DB::table('persons')->insert([
+        'n_code' => $nCode,
+        'f_name' => 'E2E',
+        'l_name' => 'PwdUser',
+        'u_id' => $unitId,
+        't_id' => 1,
+        's_id' => 1,
+        'e_id' => 1,
+        'r_id' => 1,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('users')->insert([
+        'n_code' => $nCode,
+        'password' => Hash::make($password),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $userId = DB::getPdo()->lastInsertId();
+
+    DB::table('user_units')->insert([
+        'user_id' => $userId,
+        'unit_id' => $unitId,
+        'role' => 'responsible',
+        'is_primary' => true,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $user = User::where('n_code', $nCode)->first();
+    $user->assignRole('admin');
+
+    DB::commit();
+    echo "OK: created user $nCode (id=$userId) with unit $unitId\n";
+} catch (Throwable $e) {
+    DB::rollBack();
+    echo 'ERROR: '.$e->getMessage()."\n";
+    exit(1);
+}

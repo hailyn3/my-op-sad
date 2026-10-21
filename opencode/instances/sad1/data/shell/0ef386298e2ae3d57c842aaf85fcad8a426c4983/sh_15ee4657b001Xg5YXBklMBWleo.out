@@ -1,0 +1,19 @@
+    131▕     {
+    132▕         $root = base_path();
+    133▕         $realIndex = $root.'/.git/index';
+    134▕ 
+  ➜ 135▕         $this->assertFileExists($realIndex, 'this test needs a real git index');
+    136▕ 
+    137▕         $alternate = $this->sandbox.'/index';
+    138▕ 
+    139▕         copy($realIndex, $alternate);
+
+  [33m1   [39m[39;1mtests/Feature/AppKeyGuardWiringTest.php[39;22m:[39;1m135[39;22m
+
+
+  [90mTests:[39m    [31;1m1 failed[39;22m[90m,[39m[39m [39m[33;1m2 risky[39;22m[90m,[39m[39m [39m[32;1m2664 passed[39;22m[90m (8691 assertions)[39m
+  [90mDuration:[39m [39m513.65s[39m
+  [90mRandom Order Seed:[39m [39m1792593389[39m
+
+Script php scripts/ensure-test-app-key.php && php artisan config:clear && php artisan route:clear && XDEBUG_MODE=off php artisan test handling the test event returned with error code 1
+EXIT=1

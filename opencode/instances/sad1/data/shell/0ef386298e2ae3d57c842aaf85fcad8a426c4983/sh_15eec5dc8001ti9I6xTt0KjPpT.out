@@ -1,0 +1,16 @@
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=h_dashboard
+DB_USERNAME=h_dashboard
+=== e2e env ===
+sed: can't read .env.e2e: No such file or directory
+=== docker ===
+h-dashboard-phpredisadmin 0.0.0.0:8083->80/tcp, [::]:8083->80/tcp
+h-dashboard-pgadmin 443/tcp, 0.0.0.0:8082->80/tcp, [::]:8082->80/tcp
+h-dashboard-postgis 0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+h-dashboard-redis 0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+=== ports ===
+LISTEN 0      4096                                  0.0.0.0:5432       0.0.0.0:*          
+LISTEN 0      4096                                  0.0.0.0:8000       0.0.0.0:*          
+LISTEN 0      4096                                     [::]:5432          [::]:*          

@@ -1,0 +1,12 @@
+  Database\Seeders\PersonUserSeeder ................................ 0 ms DONE  
+
+  Database\Seeders\CenterBoundarySeeder .............................. RUNNING  
+Created 113 boundaries for center units.
+  Database\Seeders\CenterBoundarySeeder .......................... 143 ms DONE  
+
+  Database\Seeders\HealthHouseBoundarySeeder ......................... RUNNING  
+  Database\Seeders\HealthHouseBoundarySeeder ..................... 533 ms DONE  
+
+  Database\Seeders\ZabbixDeviceSeeder ................................ RUNNING  
+  Database\Seeders\ZabbixDeviceSeeder ............................. 53 ms DONE  
+

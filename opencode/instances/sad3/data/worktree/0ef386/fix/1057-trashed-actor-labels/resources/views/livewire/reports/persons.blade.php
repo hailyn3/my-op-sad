@@ -1,0 +1,378 @@
+<?php
+
+use Livewire\Component;
+use Livewire\WithPagination;
+use App\Models\Person;
+use App\Services\AccessService;
+use Carbon\Carbon;
+use Morilog\Jalali\Jalalian;
+
+return new class extends Component
+{
+    use WithPagination;
+
+    /** Issue #1024 — the roster is paginated instead of hydrated whole. */
+    public int $perPage = 25;
+
+    public string $dateFrom = '';
+    public string $dateTo = '';
+    public ?int $selectedUnitId = null;
+    public ?string $selectedTahsilId = null;
+    public ?string $selectedSematId = null;
+    public ?string $selectedEstekhdamId = null;
+    public $tahsils = [];
+    public $semats = [];
+    public $estekhdams = [];
+
+    /**
+     * Issue #819: an empty scope now renders zero rows instead of every unit's
+     * rows, so the page has to say why it is empty — same treatment as the
+     * dashboard's `emptyScope` banner.
+     */
+    public bool $emptyScope = false;
+
+    public function mount(): void
+    {
+        $this->dateFrom = Jalalian::fromCarbon(now()->subYears(1))->format('Y/m/d');
+        $this->dateTo = Jalalian::fromCarbon(now())->format('Y/m/d');
+        $this->tahsils = \App\Models\Tahsil::all();
+        $this->semats = \App\Models\Semat::all();
+        $this->estekhdams = \App\Models\Estekhdam::all();
+
+        $this->emptyScope = app(AccessService::class)->accessibleUnitIds() === [];
+    }
+
+    /**
+     * Issue #1024: a filter change starts a new result set, so the roster goes
+     * back to page 1 — otherwise the user can be stranded on a page that no
+     * longer exists in the filtered set.
+     */
+    public function updated(string $property): void
+    {
+        if (in_array($property, ['selectedUnitId', 'selectedTahsilId', 'selectedSematId', 'selectedEstekhdamId'], true)) {
+            $this->resetPage();
+        }
+    }
+
+    private function parseJalaliDate(?string $date, bool $endOfDay = false): ?Carbon
+    {
+        if (empty($date)) return null;
+        try {
+            $carbon = Jalalian::fromFormat('Y/m/d', $date)->toCarbon();
+            return $endOfDay ? $carbon->endOfDay() : $carbon->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public function chartPayload(): array
+    {
+        $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+
+        // Issue #858, like reports/todos (#819): the scope predicate goes
+        // inside a closure so the chain stays an Eloquent builder — a
+        // top-level whereIn() degrades it to Query\Builder, on which `with()`
+        // below is undefined. Still unconditional, still fail-closed (`[]`
+        // compiles to `0 = 1`).
+        $baseQuery = Person::query()
+            ->where(fn ($q) => $q->whereIn('u_id', $accessibleIds))
+            ->when($this->selectedUnitId, fn($q) => $q->where('u_id', $this->selectedUnitId))
+            ->when($this->selectedTahsilId, fn($q) => $q->where('t_id', $this->selectedTahsilId))
+            ->when($this->selectedSematId, fn($q) => $q->where('s_id', $this->selectedSematId))
+            ->when($this->selectedEstekhdamId, fn($q) => $q->where('e_id', $this->selectedEstekhdamId));
+
+        $total = $baseQuery->count();
+
+        $byTahsil = Person::selectRaw('COALESCE(tahsils.name, ?) as tahsil_name, COUNT(*) as count', ['نامشخص'])
+            ->leftJoin('tahsils', 'persons.t_id', '=', 'tahsils.id')
+            ->whereIn('persons.u_id', $accessibleIds)
+            ->when($this->selectedUnitId, fn($q) => $q->where('persons.u_id', $this->selectedUnitId))
+            ->when($this->selectedSematId, fn($q) => $q->where('persons.s_id', $this->selectedSematId))
+            ->when($this->selectedEstekhdamId, fn($q) => $q->where('persons.e_id', $this->selectedEstekhdamId))
+            ->groupBy('tahsil_name')
+            ->pluck('count', 'tahsil_name')
+            ->toArray();
+
+        $bySemat = Person::selectRaw('COALESCE(semats.name, ?) as semat_name, COUNT(*) as count', ['نامشخص'])
+            ->leftJoin('semats', 'persons.s_id', '=', 'semats.id')
+            ->whereIn('persons.u_id', $accessibleIds)
+            ->when($this->selectedUnitId, fn($q) => $q->where('persons.u_id', $this->selectedUnitId))
+            ->when($this->selectedTahsilId, fn($q) => $q->where('persons.t_id', $this->selectedTahsilId))
+            ->when($this->selectedEstekhdamId, fn($q) => $q->where('persons.e_id', $this->selectedEstekhdamId))
+            ->groupBy('semat_name')
+            ->pluck('count', 'semat_name')
+            ->toArray();
+
+        $byEstekhdam = Person::selectRaw('COALESCE(estekhdams.name, ?) as estekhdam_name, COUNT(*) as count', ['نامشخص'])
+            ->leftJoin('estekhdams', 'persons.e_id', '=', 'estekhdams.id')
+            ->whereIn('persons.u_id', $accessibleIds)
+            ->when($this->selectedUnitId, fn($q) => $q->where('persons.u_id', $this->selectedUnitId))
+            ->when($this->selectedTahsilId, fn($q) => $q->where('persons.t_id', $this->selectedTahsilId))
+            ->when($this->selectedSematId, fn($q) => $q->where('persons.s_id', $this->selectedSematId))
+            ->groupBy('estekhdam_name')
+            ->pluck('count', 'estekhdam_name')
+            ->toArray();
+
+        $byUnit = Person::selectRaw('COALESCE(units.name, ?) as unit_name, COUNT(*) as count', ['نامشخص'])
+            ->leftJoin('units', 'persons.u_id', '=', 'units.id')
+            ->whereIn('persons.u_id', $accessibleIds)
+            ->when($this->selectedTahsilId, fn($q) => $q->where('persons.t_id', $this->selectedTahsilId))
+            ->when($this->selectedSematId, fn($q) => $q->where('persons.s_id', $this->selectedSematId))
+            ->when($this->selectedEstekhdamId, fn($q) => $q->where('persons.e_id', $this->selectedEstekhdamId))
+            ->groupBy('unit_name')
+            ->pluck('count', 'unit_name')
+            ->toArray();
+
+        // Eager loads first, exactly like reports/units (#819): `with()` must
+        // precede any degrading call in the chain.
+        // Issue #1024: only the row list is paginated — every aggregate above
+        // is computed from its own unpaginated query, so it still describes the
+        // whole filtered set rather than the current page.
+        $personsPage = (clone $baseQuery)
+            ->with(['unit:id,name', 'tahsil:id,name', 'semat:id,name', 'estekhdam:id,name'])
+            ->orderBy('n_code')
+            ->paginate($this->perPage);
+
+        $persons = $personsPage->getCollection()
+            ->map(fn($p) => [
+                'id' => $p->id,
+                'n_code' => $p->n_code,
+                'name' => $p->name ?? '—',
+                'unit' => $p->unit?->name ?? '—',
+                'tahsil' => $p->tahsil?->name ?? '—',
+                'semat' => $p->semat?->name ?? '—',
+                'estekhdam' => $p->estekhdam?->name ?? '—',
+            ])
+            ->all();
+
+        return [
+            'total' => $total,
+            'byTahsil' => $byTahsil,
+            'bySemat' => $bySemat,
+            'byEstekhdam' => $byEstekhdam,
+            'byUnit' => $byUnit,
+            // `persons` stays a plain array (the fail-closed security tests and
+            // the `empty()` check in the view both treat it as one); the
+            // paginator rides alongside for `->hasPages()`/`->links()`.
+            'persons' => $persons,
+            'personsPaginator' => $personsPage,
+        ];
+    }
+
+    public function getAccessibleUnitsProperty()
+    {
+        $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+        // Issue #1024: a `<select>` needs nothing but id/name.
+        return \App\Models\Unit::whereIn('id', $accessibleIds)->get(['id', 'name']);
+    }
+}; ?>
+
+<div class="p-6" dir="rtl">
+    @php $chart = $this->chartPayload(); @endphp
+    <x-header title="گزارش پرسنل" separator progress-indicator>
+        <x-slot:actions>
+            <x-theme-selector/>
+        </x-slot:actions>
+    </x-header>
+
+    @if($emptyScope)
+        <div class="alert alert-info mb-6" role="alert">
+            <x-icon name="o-information-circle" class="w-5 h-5" />
+            <span>واحدی برای نمایش انتخاب نشده</span>
+        </div>
+    @endif
+
+    {{-- فیلترها --}}
+    <x-card shadow class="mb-6">
+        <div class="flex gap-3 flex-wrap items-end">
+            <div>
+                <label class="font-bold text-xs">واحد</label>
+                <select class="select select-bordered select-sm" wire:model.live="selectedUnitId">
+                    <option value="">همه واحدها</option>
+                    @foreach($this->accessibleUnits as $u)
+                        <option value="{{ $u->id }}">{{ $u->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label class="font-bold text-xs">تحصیلات</label>
+                <select class="select select-bordered select-sm" wire:model.live="selectedTahsilId">
+                    <option value="">همه</option>
+                    @foreach($tahsils as $t)
+                        <option value="{{ $t->id }}">{{ $t->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label class="font-bold text-xs">سمت</label>
+                <select class="select select-bordered select-sm" wire:model.live="selectedSematId">
+                    <option value="">همه</option>
+                    @foreach($semats as $s)
+                        <option value="{{ $s->id }}">{{ $s->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label class="font-bold text-xs">نوع استخدام</label>
+                <select class="select select-bordered select-sm" wire:model.live="selectedEstekhdamId">
+                    <option value="">همه</option>
+                    @foreach($estekhdams as $e)
+                        <option value="{{ $e->id }}">{{ $e->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+        </div>
+    </x-card>
+
+    {{-- آمار کلی --}}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-200 p-4">
+            <div class="stat-title text-xs">کل پرسنل</div>
+            <div class="stat-value text-lg text-primary">{{ $chart['total'] }}</div>
+        </div>
+        <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-200 p-4">
+            <div class="stat-title text-xs">تحصیلات</div>
+            <div class="stat-value text-lg text-info">{{ count($chart['byTahsil']) }}</div>
+        </div>
+        <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-200 p-4">
+            <div class="stat-title text-xs">سمت</div>
+            <div class="stat-value text-lg text-success">{{ count($chart['bySemat']) }}</div>
+        </div>
+        <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-200 p-4">
+            <div class="stat-title text-xs">نوع استخدام</div>
+            <div class="stat-value text-lg text-warning">{{ count($chart['byEstekhdam']) }}</div>
+        </div>
+    </div>
+
+    {{-- نمودارها --}}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <x-card shadow>
+            <h3 class="font-bold mb-4">بر اساس تحصیلات</h3>
+            <div id="tahsilChart" wire:ignore style="height: 250px;"></div>
+        </x-card>
+        <x-card shadow>
+            <h3 class="font-bold mb-4">بر اساس سمت</h3>
+            <div id="sematChart" wire:ignore style="height: 250px;"></div>
+        </x-card>
+        <x-card shadow>
+            <h3 class="font-bold mb-4">بر اساس استخدام</h3>
+            <div id="estekhdamChart" wire:ignore style="height: 250px;"></div>
+        </x-card>
+    </div>
+
+    {{-- جدول --}}
+    <x-card shadow>
+        <h3 class="font-bold mb-4">لیست پرسنل</h3>
+        {{-- Issue #858: server-rendered chart aggregates. The @script below
+            reads this (morphed on every render) instead of firing a second
+            method request per filter change. --}}
+        <div id="personsChartData" class="hidden" data-chart='@json(['byTahsil' => $chart['byTahsil'], 'bySemat' => $chart['bySemat'], 'byEstekhdam' => $chart['byEstekhdam']])'></div>
+        <div class="overflow-x-auto">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>کد ملی</th>
+                        <th>نام</th>
+                        <th>واحد</th>
+                        <th>تحصیلات</th>
+                        <th>سمت</th>
+                        <th>استخدام</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($chart['persons'] as $p)
+                    <tr>
+                        <td>{{ $p['id'] }}</td>
+                        <td>{{ $p['n_code'] }}</td>
+                        <td>{{ $p['name'] }}</td>
+                        <td>{{ $p['unit'] }}</td>
+                        <td>{{ $p['tahsil'] }}</td>
+                        <td>{{ $p['semat'] }}</td>
+                        <td>{{ $p['estekhdam'] }}</td>
+                    </tr>
+                    @endforeach
+                    @if(empty($chart['persons']))
+                    <tr>
+                        <td colspan="7" class="text-center text-base-content/40">موردی یافت نشد</td>
+                    </tr>
+                    @endif
+                </tbody>
+            </table>
+        </div>
+
+        {{-- Issue #1024: the hand-rolled table has no `with-pagination`, so the
+            paginator rides alongside the payload. `->links()` renders Livewire's
+            Tailwind view, which `lang/fa.json` already translates. --}}
+        @if ($chart['personsPaginator']->hasPages())
+            {{-- `mary-table-pagination` is the app's own pagination style hook
+                (`resources/css/app.css`); the hand-rolled table cannot pass it
+                through `x-table`, so it is applied by hand. --}}
+            <div class="mt-4 mary-table-pagination">
+                {{ $chart['personsPaginator']->links() }}
+            </div>
+        @endif
+    </x-card>
+</div>
+
+@assets
+<script src="{{ asset('js/chart/highcharts.js') }}"></script>
+@endassets
+
+@script
+<script>
+    function waitForHighcharts(callback, attempts = 0) {
+        if (typeof window.Highcharts !== 'undefined') { callback(); return; }
+        if (attempts > 100) { console.error('Highcharts failed to load'); return; }
+        setTimeout(() => waitForHighcharts(callback, attempts + 1), 50);
+    }
+
+    function destroyChart(id) {
+        const container = document.getElementById(id);
+        if (!container || typeof Highcharts === 'undefined') return;
+        const existing = Highcharts.charts?.find(c => c && c.renderTo === container);
+        if (existing) existing.destroy();
+        container.innerHTML = '';
+    }
+
+    function renderPie(containerId, data) {
+        destroyChart(containerId);
+        const labels = Object.keys(data || {});
+        const values = Object.values(data || {});
+        if (labels.length > 0) {
+            const colors = ['#6366f1','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899','#14b8a6','#a855f7'];
+            Highcharts.chart(containerId, {
+                chart: { type: 'pie' },
+                title: { text: '' },
+                series: [{ name: 'تعداد', data: labels.map((l, i) => ({ name: l, y: values[i], color: colors[i % colors.length] })) }],
+                credits: { enabled: false },
+                plotOptions: { pie: { dataLabels: { enabled: true, format: '{point.name}: {y}' } } }
+            });
+        }
+    }
+
+    function render() {
+        waitForHighcharts(() => {
+            // Issue #858: read the server-rendered aggregates above — the
+            // inline @php already ran the payload for this render, so a
+            // second method request would just re-run it.
+            const el = document.getElementById('personsChartData');
+            const data = el ? JSON.parse(el.dataset.chart) : {};
+            renderPie('tahsilChart', data.byTahsil);
+            renderPie('sematChart', data.bySemat);
+            renderPie('estekhdamChart', data.byEstekhdam);
+        });
+    }
+
+    render();
+    // $watch fires when the reactive store patches (before Livewire morphs
+    // the fresh data-chart into the DOM), so re-render again after morph.
+    $wire.$watch('selectedUnitId', () => render());
+    $wire.$watch('selectedTahsilId', () => render());
+    $wire.$watch('selectedSematId', () => render());
+    $wire.$watch('selectedEstekhdamId', () => render());
+    Livewire.hook('morphed', ({ component }) => {
+        if (component.id === $wire.$id) render();
+    });
+</script>
+@endscript

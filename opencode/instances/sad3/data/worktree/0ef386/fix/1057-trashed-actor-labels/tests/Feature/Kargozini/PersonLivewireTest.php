@@ -1,0 +1,975 @@
+<?php
+
+namespace Tests\Feature\Kargozini;
+
+use App\Models\Hardware;
+use App\Models\Person;
+use App\Models\Person as PersonModel;
+use App\Models\Unit;
+use App\Models\User;
+use Database\Seeders\PermissionSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Session;
+use Livewire\Livewire;
+use Tests\Support\Concerns\InteractsWithTestSetup;
+use Tests\TestCase;
+
+/**
+ * Exercises the مدیریت پرسنل (personnel management) Livewire component.
+ * Covers render/with(), search normalization, the #494 list filters,
+ * create/update/delete with organizational-scope enforcement, the
+ * FK-violation guard on delete, and linked-user unit sync.
+ *
+ * #936 — the delete tests below are the regression pin. `delete()` used to be
+ * typed `delete(PersonModel $person)`, which Livewire resolved through
+ * `getRouteKeyName()` = `n_code`, while the Blade call site sends `->id`. The
+ * binding matched nothing and threw before the method body ran, so deletion
+ * never happened in the browser.
+ *
+ * Rules these tests follow so they cannot go green for the wrong reason:
+ *
+ *  - **Pass the raw scalar** (`->call('delete', $row->id)`). A hydrated model
+ *    skips implicit binding entirely and passes against the broken code.
+ *  - **Assert on the database, and on the toast.** `assertDatabaseMissing`
+ *    alone is vacuous — the row survives when the request dies too. The
+ *    success/error toast is what proves the method body ran. Mary `Toast`
+ *    emits a JS effect, never HTML, so `assertSee` cannot find it; see
+ *    `toastTitles()`.
+ *  - **A test that only passes against broken code proves nothing** — each
+ *    delete test here fails against the old signature (verified).
+ *  - `test_delete_call_site_renders_the_primary_key_not_the_route_key` guards
+ *    the markup itself, which the method-level tests cannot see, and rejects
+ *    the tempting `->n_code` "fix" whose leading zeros the browser strips.
+ */
+covers(Person::class);
+
+class PersonLivewireTest extends TestCase
+{
+    use InteractsWithTestSetup;
+    use RefreshDatabase;
+
+    protected Unit $unit;
+
+    protected Unit $otherUnit;
+
+    protected User $user;
+
+    protected int $tId;
+
+    protected int $eId;
+
+    protected int $sId;
+
+    protected int $rId;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seedLookupTables();
+        Session::flush();
+
+        $this->tId = DB::table('tahsils')->first()->id;
+        $this->eId = DB::table('estekhdams')->first()->id;
+        $this->sId = DB::table('semats')->first()->id;
+        $this->rId = DB::table('radifs')->first()->id;
+
+        $this->unit = Unit::create(['name' => 'واحد مرکزی']);
+        // A sibling unit (not a descendant of $this->unit) -> out of scope.
+        $this->otherUnit = Unit::create(['name' => 'واحد منطقه‌ای']);
+
+        $nCode = (string) fake()->unique()->numerify('##########');
+        PersonModel::create([
+            'n_code' => $nCode, 'f_name' => 'مهدی', 'l_name' => 'عسگری',
+            't_id' => $this->tId, 'e_id' => $this->eId, 's_id' => $this->sId, 'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+        $this->user = User::create(['n_code' => $nCode, 'password' => Hash::make('password')]);
+        $this->user->units()->attach($this->unit->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $this->unit->id);
+        $this->actingAs($this->user);
+
+        // #805: every mutating method in this component calls
+        // authorize('manage_personnel'), so the default persona of this
+        // suite — the "writes personnel" user — must hold it. The
+        // kargozini-only (read-only) persona is built per test by
+        // actingAsKargoziniOnlyUser().
+        $this->seed(PermissionSeeder::class);
+        $this->user->givePermissionTo('manage_personnel');
+    }
+
+    /**
+     * Swap the acting user for one that holds ONLY `kargozini` — the
+     * lookup-table permission that opens the read union — while attached
+     * to the same unit as $this->unit, so organizational scope is NOT what
+     * refuses the write.
+     */
+    protected function actingAsKargoziniOnlyUser(): User
+    {
+        $nCode = (string) fake()->unique()->numerify('##########');
+        PersonModel::create([
+            'n_code' => $nCode, 'f_name' => 'فقط', 'l_name' => 'خواندنی',
+            't_id' => $this->tId, 'e_id' => $this->eId, 's_id' => $this->sId, 'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+        $reader = User::create(['n_code' => $nCode, 'password' => Hash::make('password')]);
+        $reader->units()->attach($this->unit->id, ['role' => 'staff', 'is_primary' => true]);
+        $reader->givePermissionTo('kargozini');
+        Session::put('current_unit_id', $this->unit->id);
+        $this->actingAs($reader);
+
+        return $reader;
+    }
+
+    /**
+     * Fill the component form fields from a person attribute array.
+     */
+    protected function fillForm($component, array $data)
+    {
+        return $component
+            ->set('n_code', $data['n_code'])
+            ->set('f_name', $data['f_name'])
+            ->set('l_name', $data['l_name'])
+            ->set('t_id', $data['t_id'])
+            ->set('e_id', $data['e_id'])
+            ->set('s_id', $data['s_id'])
+            ->set('r_id', $data['r_id'])
+            ->set('u_id', $data['u_id']);
+    }
+
+    /**
+     * Mary `Toast` delivers its message as a JS effect (`toast({...})`), not
+     * as rendered HTML, so `assertSee` can never find it. Each effect payload
+     * is a JSON string nested inside the JS expression, which escapes the
+     * Persian text to `\uXXXX` — decode before matching.
+     *
+     * Returns the titles of every toast emitted by the last action, so a
+     * caller can assert on the message the user actually sees.
+     *
+     * @return list<string>
+     */
+    protected function toastTitles($component): array
+    {
+        $titles = [];
+
+        foreach (array_column($component->effects['xjs'] ?? [], 'expression') as $expression) {
+            if (! str_starts_with($expression, 'toast(')) {
+                continue;
+            }
+
+            $inner = json_decode(substr($expression, strlen('toast('), -1), true);
+
+            if (is_array($inner) && isset($inner['toast']['title'])) {
+                $titles[] = (string) $inner['toast']['title'];
+            }
+        }
+
+        return $titles;
+    }
+
+    protected function personData(array $overrides = []): array
+    {
+        return array_merge([
+            'n_code' => (string) fake()->unique()->numerify('##########'),
+            'f_name' => 'رضا',
+            'l_name' => 'کریمی',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ], $overrides);
+    }
+
+    public function test_component_renders_with_dropdowns(): void
+    {
+        Livewire::test('kargozini.person')
+            ->assertOk()
+            ->assertViewHas('persons')
+            ->assertViewHas('headers')
+            ->assertViewHas('units')
+            ->assertViewHas('tahsils')
+            ->assertViewHas('estekhdams')
+            ->assertViewHas('semats')
+            ->assertViewHas('radifs');
+    }
+
+    public function test_search_finds_by_name_in_either_order(): void
+    {
+        // "عسگری مهدی" (last first) must find «مهدی عسگری» (#494).
+        Livewire::test('kargozini.person')
+            ->set('search', 'عسگری مهدی')
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+    }
+
+    public function test_search_normalizes_persian_digits_in_query(): void
+    {
+        // Codes are stored with Latin digits; a Persian-digit search term
+        // must be normalized before matching.
+        $person = PersonModel::where('u_id', $this->unit->id)->first();
+        $latinCode = $person->n_code;
+        $persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+        $persianCode = collect(mb_str_split($latinCode))
+            ->map(fn ($d) => $persianDigits[(int) $d])
+            ->implode('');
+
+        Livewire::test('kargozini.person')
+            ->set('search', $persianCode)
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+    }
+
+    public function test_search_without_match_returns_empty(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('search', 'ناهمخوان کامل')
+            ->assertViewHas('persons', fn ($p) => $p->count() === 0);
+    }
+
+    public function test_filter_by_unit_narrows_results(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('filter_u_id', $this->unit->id)
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+
+        Livewire::test('kargozini.person')
+            ->set('filter_u_id', $this->otherUnit->id) // no persons there
+            ->assertViewHas('persons', fn ($p) => $p->count() === 0);
+    }
+
+    public function test_filter_by_semat_narrows_results(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('filter_s_id', $this->sId)
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+
+        Livewire::test('kargozini.person')
+            ->set('filter_s_id', 99999) // different semat -> no match
+            ->assertViewHas('persons', fn ($p) => $p->count() === 0);
+    }
+
+    public function test_filter_by_tahsil_estekhdam_radif(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('filter_t_id', $this->tId)
+            ->set('filter_e_id', $this->eId)
+            ->set('filter_r_id', $this->rId)
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+    }
+
+    public function test_clear_filters_resets_filter_properties(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('filter_u_id', $this->unit->id)
+            ->set('filter_s_id', $this->sId)
+            ->set('showFilters', true)
+            ->call('clearFilters')
+            ->assertSet('filter_u_id', null)
+            ->assertSet('filter_s_id', null)
+            ->assertSet('filter_t_id', null)
+            ->assertSet('filter_e_id', null)
+            ->assertSet('filter_r_id', null);
+    }
+
+    public function test_start_create_opens_form_and_resets(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('n_code', '9999999999')
+            ->call('startCreate')
+            ->assertSet('formOpen', true)
+            ->assertSet('n_code', null)
+            ->assertSet('editingId', null);
+    }
+
+    public function test_save_person_creates_in_accessible_unit(): void
+    {
+        $data = $this->personData();
+
+        $component = Livewire::test('kargozini.person');
+        $this->fillForm($component, $data);
+        $component->call('savePerson');
+
+        $this->assertDatabaseHas('persons', [
+            'n_code' => $data['n_code'], 'f_name' => $data['f_name'], 'u_id' => $this->unit->id,
+        ]);
+    }
+
+    public function test_save_person_denied_in_inaccessible_unit(): void
+    {
+        $data = $this->personData(['u_id' => $this->otherUnit->id]); // out of scope
+
+        $component = Livewire::test('kargozini.person');
+        $this->fillForm($component, $data);
+        $component->call('savePerson');
+
+        $this->assertDatabaseMissing('persons', ['n_code' => $data['n_code']]);
+    }
+
+    public function test_save_person_validates_required_fields(): void
+    {
+        Livewire::test('kargozini.person')
+            ->set('n_code', '')
+            ->set('f_name', '')
+            ->set('l_name', '')
+            ->set('u_id', $this->unit->id)
+            ->call('savePerson')
+            ->assertHasErrors(['n_code', 'f_name', 'l_name', 't_id', 'e_id', 's_id', 'r_id']);
+    }
+
+    public function test_save_person_updates_existing(): void
+    {
+        $person = PersonModel::where('u_id', $this->unit->id)->first();
+
+        $component = Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id);
+        $this->fillForm($component, [
+            'n_code' => $person->n_code,
+            'f_name' => 'UpdatedFirst',
+            'l_name' => 'UpdatedLast',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+        $component->call('savePerson');
+
+        $this->assertDatabaseHas('persons', [
+            'id' => $person->id, 'f_name' => 'UpdatedFirst', 'l_name' => 'UpdatedLast',
+        ]);
+    }
+
+    /**
+     * Issue #959: n_code is immutable on the update path — hardwares.n_code
+     * has no FK, so a rename silently orphans every hardware row of that
+     * person. The server must refuse even a crafted Livewire call.
+     */
+    public function test_save_person_update_cannot_change_n_code(): void
+    {
+        $person = PersonModel::where('u_id', $this->unit->id)->first();
+        Hardware::factory()->create(['n_code' => $person->n_code]);
+
+        $component = Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id);
+        $this->fillForm($component, [
+            'n_code' => '9999999999',
+            'f_name' => 'UpdatedFirst',
+            'l_name' => 'UpdatedLast',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+        $component->call('savePerson')
+            ->assertHasErrors(['n_code']);
+
+        // n_code untouched; other edits did not slip through either.
+        $this->assertDatabaseHas('persons', [
+            'id' => $person->id, 'n_code' => $person->n_code, 'f_name' => 'مهدی',
+        ]);
+        // The hardware row still resolves its person — no orphan.
+        $this->assertNotNull(Hardware::where('n_code', $person->n_code)->first()->person);
+    }
+
+    /**
+     * Issue #959: the UI shows the contract — the n_code input is disabled
+     * in edit mode (create mode keeps it enabled).
+     */
+    public function test_edit_form_disables_n_code_input(): void
+    {
+        $person = PersonModel::where('u_id', $this->unit->id)->first();
+
+        // Extract the full <input> tag that carries wire:model="n_code",
+        // regardless of attribute order.
+        $editHtml = Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id)
+            ->html();
+        $this->assertMatchesRegularExpression('/<input[^>]*wire:model="n_code"[^>]*>/', $editHtml);
+        preg_match('/<input[^>]*wire:model="n_code"[^>]*/', $editHtml, $m);
+        $this->assertStringContainsString('disabled', $m[0], 'n_code input must be disabled in edit mode');
+
+        $createHtml = Livewire::test('kargozini.person')
+            ->call('startCreate')
+            ->html();
+        preg_match('/<input[^>]*wire:model="n_code"[^>]*/', $createHtml, $m);
+        $this->assertNotEmpty($m, 'n_code input not found in create form');
+        $this->assertStringNotContainsString('disabled', $m[0], 'n_code input must stay enabled in create mode');
+    }
+
+    public function test_save_person_update_denied_for_out_of_scope(): void
+    {
+        // Person owned by otherUnit (out of current scope).
+        $otherNCode = (string) fake()->unique()->numerify('##########');
+        $other = PersonModel::create([
+            'n_code' => $otherNCode, 'f_name' => 'بیگانه', 'l_name' => 'صحرا',
+            't_id' => $this->tId, 'e_id' => $this->eId, 's_id' => $this->sId, 'r_id' => $this->rId,
+            'u_id' => $this->otherUnit->id,
+        ]);
+
+        $component = Livewire::test('kargozini.person');
+        $this->fillForm($component, [
+            'n_code' => $otherNCode,
+            'f_name' => 'Changed',
+            'l_name' => 'صحرا',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->otherUnit->id,
+        ])->set('editingId', $other->id)->call('savePerson');
+
+        $this->assertDatabaseHas('persons', [
+            'id' => $other->id, 'f_name' => 'بیگانه', // unchanged
+        ]);
+    }
+
+    public function test_edit_person_loads_fields_when_in_scope(): void
+    {
+        $person = PersonModel::where('u_id', $this->unit->id)->first();
+
+        Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id)
+            ->assertSet('editingId', $person->id)
+            ->assertSet('n_code', $person->n_code)
+            ->assertSet('f_name', 'مهدی')
+            ->assertSet('formOpen', true);
+    }
+
+    public function test_edit_person_denied_out_of_scope(): void
+    {
+        $otherNCode = (string) fake()->unique()->numerify('##########');
+        $other = PersonModel::create([
+            'n_code' => $otherNCode, 'f_name' => 'ممنوع', 'l_name' => 'ورود',
+            't_id' => $this->tId, 'e_id' => $this->eId, 's_id' => $this->sId, 'r_id' => $this->rId,
+            'u_id' => $this->otherUnit->id,
+        ]);
+
+        Livewire::test('kargozini.person')
+            ->call('editPerson', $other->id)
+            ->assertSet('editingId', null) // not loaded
+            ->assertSet('formOpen', false);
+    }
+
+    public function test_delete_removes_unreferenced_person_in_scope(): void
+    {
+        // Fresh person with no dependent rows (no linked user) -> deletable.
+        $fresh = PersonModel::create($this->personData());
+
+        // #936: a RAW SCALAR primary key, which is what the browser sends.
+        // Passing a hydrated model would skip Livewire's implicit binding
+        // entirely and would keep passing against the broken signature.
+        $component = Livewire::test('kargozini.person')
+            ->call('delete', $fresh->id);
+
+        $this->assertDatabaseMissing('persons', ['id' => $fresh->id]);
+        // The success toast proves the body ran to completion — a bare
+        // `assertDatabaseMissing` would also pass if the request had died
+        // before the method was ever entered.
+        $this->assertContains('رضا کریمی حذف شد', $this->toastTitles($component));
+    }
+
+    public function test_delete_call_site_renders_the_primary_key_not_the_route_key(): void
+    {
+        // #936 guardrail: the Blade call site must keep emitting `->id`. This
+        // pins the rendered markup, because the method-level tests drive the
+        // component directly and cannot see what the browser is told to send.
+        // An `n_code` here would be an UNQUOTED JS numeric literal.
+        $leadingZero = PersonModel::create($this->personData(['n_code' => '0023548258']));
+
+        Livewire::test('kargozini.person')
+            ->assertSeeHtml('wire:click="delete('.$leadingZero->id.')"')
+            ->assertDontSeeHtml('wire:click="delete(0023548258)"');
+    }
+
+    public function test_delete_removes_a_person_whose_n_code_starts_with_a_zero(): void
+    {
+        // #936: the case that distinguishes the real fix from the naive one.
+        // `n_code` is `string(10)` and Iranian national codes commonly carry
+        // a leading zero. The tempting alternative fix —
+        // `wire:click="delete({{ $person->n_code }})"` — interpolates
+        // UNQUOTED, so the browser parses `0023548258` as a JS numeric
+        // literal and strips the zeros (verified in V8:
+        // `function d(){return arguments[0]}; d(0023548258) === 23548258`).
+        // With the row addressable ONLY by its primary key, this deletes.
+        $leadingZero = PersonModel::create($this->personData(['n_code' => '0023548258']));
+
+        Livewire::test('kargozini.person')
+            ->call('delete', $leadingZero->id);
+
+        $this->assertDatabaseMissing('persons', ['id' => $leadingZero->id]);
+        // The value the browser would have coerced cannot address the row.
+        $this->assertDatabaseMissing('persons', ['n_code' => '23548258']);
+    }
+
+    /**
+     * Issue #959: hardwares.n_code has no FK, so deleting a person who owns
+     * hardware would silently orphan those rows. Refuse while any exist.
+     */
+    public function test_delete_person_with_hardware_is_refused(): void
+    {
+        $target = PersonModel::create($this->personData());
+        Hardware::factory()->create(['n_code' => $target->n_code]);
+
+        // #936: pass the primary key, not a hydrated model — delete() now
+        // takes an `int`.
+        $component = Livewire::test('kargozini.person')
+            ->call('delete', $target->id);
+
+        // The refusal toast is what proves the method body actually ran and
+        // reached the #959 hardware guard; a bare "row survives" would be
+        // vacuous against a signature that never executes the body.
+        $this->assertContains(
+            'امکان حذف وجود ندارد زیرا برای این پرسنل سخت‌افزار ثبت شده است.',
+            $this->toastTitles($component)
+        );
+        // Both rows survive.
+        $this->assertDatabaseHas('persons', ['id' => $target->id]);
+        $this->assertDatabaseHas('hardwares', ['n_code' => $target->n_code]);
+    }
+
+    public function test_delete_denied_out_of_scope(): void
+    {
+        // #936: this assertion alone is VACUOUS against the broken signature —
+        // the row survived back then too, because nothing was ever deleted.
+        // The toast is what proves the method body actually ran and reached the
+        // scope guard, so assert on it too.
+        $otherNCode = (string) fake()->unique()->numerify('##########');
+        $other = PersonModel::create([
+            'n_code' => $otherNCode, 'f_name' => 'محفوظ', 'l_name' => 'سیستم',
+            't_id' => $this->tId, 'e_id' => $this->eId, 's_id' => $this->sId, 'r_id' => $this->rId,
+            'u_id' => $this->otherUnit->id,
+        ]);
+
+        $component = Livewire::test('kargozini.person')
+            ->call('delete', $other->id);
+
+        // The refusal is a toast (Mary `Toast` sends a JS effect, never HTML),
+        // not an exception — same channel as the edit path's refusal.
+        $this->assertContains('شما مجاز به حذف این پرسنل نیستید.', $this->toastTitles($component));
+        $this->assertDatabaseHas('persons', ['id' => $other->id]);
+    }
+
+    public function test_delete_handles_fk_violation_gracefully(): void
+    {
+        // persons rows referenced elsewhere are onDelete(restrict); the
+        // component must swallow the failure and keep the row.
+        //
+        // #936: this used to pass a hydrated anonymous subclass whose
+        // `delete()` threw, which only worked because the parameter was a
+        // model type. `delete()` now takes an `int`, so the restriction is
+        // simulated through a `deleting` model event instead — it still fires
+        // from inside the real `Person::delete()` call the component makes.
+        //
+        // A REAL FK violation is not usable here: Postgres aborts the whole
+        // transaction on the constraint error, and `RefreshDatabase` wraps
+        // every test in one, so the assertion afterwards cannot run.
+        $target = PersonModel::create($this->personData());
+
+        PersonModel::deleting(function (PersonModel $model) use ($target) {
+            if ($model->id === $target->id) {
+                throw new \RuntimeException('simulated FK restriction');
+            }
+        });
+
+        $component = Livewire::test('kargozini.person')
+            ->call('delete', $target->id);
+
+        // Row survives (covers the catch branch). The toast is what proves the
+        // catch branch ran rather than the row simply never being reached —
+        // against the broken #936 signature this assertion passed vacuously.
+        $this->assertContains(
+            'امکان حذف وجود ندارد زیرا در جدول دیگری استفاده شده است.',
+            $this->toastTitles($component)
+        );
+        $this->assertDatabaseHas('persons', ['id' => $target->id]);
+    }
+
+    public function test_save_person_syncs_linked_user_units(): void
+    {
+        // A user sharing the person's n_code gets attached to the person's
+        // unit on save (update branch).
+        $userNCode = (string) fake()->unique()->numerify('##########');
+        // Person first (users.n_code FK -> persons.n_code), then the user.
+        $person = PersonModel::create($this->personData(['n_code' => $userNCode]));
+        $linkedUser = User::create(['n_code' => $userNCode, 'password' => Hash::make('password')]);
+        $this->assertFalse(
+            $linkedUser->units()->where('units.id', $this->unit->id)->exists()
+        );
+
+        $component = Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id);
+        $this->fillForm($component, [
+            'n_code' => $userNCode,
+            'f_name' => 'همراه',
+            'l_name' => 'کاربر',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+        $component->call('savePerson');
+
+        $this->assertDatabaseHas('persons', ['n_code' => $userNCode, 'f_name' => 'همراه']);
+        // The linked user is now attached to the person's unit.
+        $this->assertTrue(
+            $linkedUser->units()->where('units.id', $this->unit->id)->exists()
+        );
+    }
+
+    // -----------------------------------------------------------
+    //  شماره تماس (#738)
+    // -----------------------------------------------------------
+
+    public function test_save_person_stores_the_phone(): void
+    {
+        $data = $this->personData();
+
+        $component = Livewire::test('kargozini.person');
+        $this->fillForm($component, $data)->set('phone', '09123456789');
+        $component->call('savePerson');
+
+        $this->assertDatabaseHas('persons', [
+            'n_code' => $data['n_code'], 'phone' => '09123456789',
+        ]);
+    }
+
+    public function test_edit_form_fills_the_saved_phone(): void
+    {
+        // «نمایش» (#738): the edit form is where this page shows a record's
+        // saved details, so editPerson() must load the phone into the form.
+        $person = PersonModel::where('u_id', $this->unit->id)->firstOrFail();
+        $person->update(['phone' => '02188776655']);
+
+        Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id)
+            ->assertSet('phone', '02188776655');
+    }
+
+    public function test_save_person_validates_the_phone_max_length(): void
+    {
+        // Free text, but the column and the decided rule both cap at 20 (#738).
+        $data = $this->personData();
+
+        $component = Livewire::test('kargozini.person');
+        $this->fillForm($component, $data)->set('phone', str_repeat('9', 21));
+        $component->call('savePerson')->assertHasErrors(['phone' => 'max']);
+
+        $this->assertDatabaseMissing('persons', ['n_code' => $data['n_code']]);
+    }
+
+    public function test_search_folds_zwj_in_stored_name(): void
+    {
+        // Stored name contains ZWNJ (U+200C): "حرفه\u{200C}ای"
+        // User searches "حرفه ای" (space) — both column and term are folded.
+        $nCode = (string) fake()->unique()->numerify('##########');
+        $person = PersonModel::create([
+            'n_code' => $nCode,
+            'f_name' => 'مهدی',
+            'l_name' => "حرفه\u{200C}ای", // ZWNJ in last name (double quotes for Unicode escape)
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+        $person->refresh();
+
+        Livewire::test('kargozini.person')
+            ->set('search', 'حرفه ای')
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+    }
+
+    public function test_search_folds_arabic_alef_in_stored_name(): void
+    {
+        // Stored name contains Arabic alef-madda (U+0622): "آموزش"
+        // User searches "اموزش" (plain alef) — both column and term are folded.
+        $nCode = (string) fake()->unique()->numerify('##########');
+        PersonModel::create([
+            'n_code' => $nCode,
+            'f_name' => 'آموزش',
+            'l_name' => 'کاربر',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+
+        Livewire::test('kargozini.person')
+            ->set('search', 'اموزش')
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+    }
+
+    public function test_search_folds_persian_digits_in_stored_name(): void
+    {
+        // Stored n_code uses Latin digits, but we also test Persian digits in name columns.
+        // A user types Persian digits; term is folded, column is folded.
+        $nCode = (string) fake()->unique()->numerify('##########');
+        PersonModel::create([
+            'n_code' => $nCode,
+            'f_name' => 'تست۴۵', // Persian digits in first name
+            'l_name' => 'کاربر',
+            't_id' => $this->tId,
+            'e_id' => $this->eId,
+            's_id' => $this->sId,
+            'r_id' => $this->rId,
+            'u_id' => $this->unit->id,
+        ]);
+
+        Livewire::test('kargozini.person')
+            ->set('search', 'تست45') // Latin digits in search
+            ->assertViewHas('persons', fn ($p) => $p->count() === 1);
+    }
+
+    // -----------------------------------------------------------
+    //  گیت نوشتن `manage_personnel` (#805)
+    // -----------------------------------------------------------
+
+    public function test_kargozini_only_user_is_refused_create(): void
+    {
+        // The read union `kargozini|manage_personnel` opens this page, but
+        // #775 decided writes are `manage_personnel` only — the API refuses
+        // the same operation, so the UI must refuse it too (#805).
+        $this->actingAsKargoziniOnlyUser();
+        $data = $this->personData();
+
+        $component = Livewire::test('kargozini.person');
+        $this->fillForm($component, $data);
+        $component->call('savePerson')->assertForbidden();
+
+        $this->assertDatabaseMissing('persons', ['n_code' => $data['n_code']]);
+    }
+
+    public function test_kargozini_only_user_is_refused_update(): void
+    {
+        $this->actingAsKargoziniOnlyUser();
+        $person = PersonModel::where('u_id', $this->unit->id)
+            ->where('f_name', 'مهدی')
+            ->firstOrFail();
+
+        Livewire::test('kargozini.person')
+            ->call('editPerson', $person->id)
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('persons', ['id' => $person->id, 'f_name' => 'مهدی']);
+    }
+
+    public function test_kargozini_only_user_is_refused_delete(): void
+    {
+        $this->actingAsKargoziniOnlyUser();
+        $fresh = PersonModel::create($this->personData());
+
+        Livewire::test('kargozini.person')
+            ->call('delete', $fresh->id)
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('persons', ['id' => $fresh->id]);
+    }
+
+    public function test_kargozini_only_user_is_refused_the_create_form(): void
+    {
+        // startCreate() opens the write form. A read-only user must not even
+        // get the form, so a `kargozini`-only session sees no button that
+        // can only fail.
+        $this->actingAsKargoziniOnlyUser();
+
+        Livewire::test('kargozini.person')
+            ->call('startCreate')
+            ->assertForbidden()
+            ->assertSet('formOpen', false);
+    }
+
+    public function test_kargozini_only_user_sees_no_write_controls(): void
+    {
+        $this->actingAsKargoziniOnlyUser();
+
+        Livewire::test('kargozini.person')
+            ->assertOk()
+            ->assertDontSeeHtml('wire:click="startCreate"')
+            ->assertDontSeeHtml('wire:click="editPerson(')
+            ->assertDontSeeHtml('wire:click="delete(');
+    }
+
+    public function test_write_controls_are_visible_for_manage_personnel_holder(): void
+    {
+        // The mirror of the test above: the gate must not hide the page from
+        // the user who is allowed to write.
+        Livewire::test('kargozini.person')
+            ->assertOk()
+            ->assertSeeHtml('wire:click="startCreate"')
+            ->assertSeeHtml('wire:click="editPerson(')
+            ->assertSeeHtml('wire:click="delete(');
+    }
+
+    public function test_update_rejects_a_u_id_outside_the_accessible_units(): void
+    {
+        // The pre-update scope check validates the STORED u_id only, so the
+        // submitted value used to rewrite it — moving the record into a unit
+        // the actor never had read access to (#805).
+        $person = PersonModel::where('u_id', $this->unit->id)
+            ->where('f_name', 'مهدی')
+            ->firstOrFail();
+
+        Livewire::test('kargozini.person')
+            ->set('editingId', $person->id)
+            ->set('n_code', $person->n_code)
+            ->set('f_name', 'جابه‌جا')
+            ->set('l_name', 'شده')
+            ->set('t_id', $this->tId)
+            ->set('e_id', $this->eId)
+            ->set('s_id', $this->sId)
+            ->set('r_id', $this->rId)
+            ->set('u_id', $this->otherUnit->id) // outside the actor's subtree
+            ->call('savePerson');
+
+        $this->assertDatabaseHas('persons', [
+            'id' => $person->id,
+            'u_id' => $this->unit->id, // not moved
+            'f_name' => 'مهدی',        // and not edited either
+        ]);
+    }
+
+    // -----------------------------------------------------------
+    //  نشت نام واحد خارج از scope (#919)
+    // -----------------------------------------------------------
+
+    /**
+     * `with()` builds `$units` with an unconditional
+     * `whereIn('id', $accessibleUnitIds)`, so `firstWhere()` resolves the
+     * name only for an in-scope unit — the `?? Unit::find($this->...)`
+     * fallback therefore ran exactly when the unit was OUT of scope.
+     * The filter badge is reachable through `showFilters`, which carries no
+     * `authorize()` behind it at all.
+     */
+    public function test_filter_unit_name_does_not_leak_an_out_of_scope_unit(): void
+    {
+        $this->actingAsKargoziniOnlyUser();
+
+        $component = Livewire::test('kargozini.person')
+            ->set('showFilters', true)
+            ->set('filter_u_id', $this->otherUnit->id)
+            // #1171: the picker is render-on-open — with the modal closed the
+            // tree is not in the DOM at all, so the assertion below would be
+            // vacuously true. Open it: the tree that renders is the scoped
+            // one, and the out-of-scope unit must not be in it.
+            ->set('filterUnitModal', true);
+
+        $this->assertStringNotContainsString($this->otherUnit->name, $component->html());
+    }
+
+    /**
+     * The same shape one step over: `formOpen` and `u_id` are unlocked
+     * public state, so a crafted payload renders the selected-unit badge
+     * without going through `startCreate()`'s authorize() check.
+     * (`formOpen`'s own bypass is out of scope here — see the #919 review —
+     * this pins the name disclosure only.)
+     */
+    public function test_selected_unit_name_does_not_leak_an_out_of_scope_unit(): void
+    {
+        $this->actingAsKargoziniOnlyUser();
+
+        $component = Livewire::test('kargozini.person')
+            ->set('formOpen', true)
+            ->set('u_id', $this->otherUnit->id);
+
+        $this->assertStringNotContainsString($this->otherUnit->name, $component->html());
+    }
+
+    /**
+     * The mirror case: deleting the fallback must not over-correct and hide
+     * a unit the caller IS allowed to see.
+     */
+    public function test_in_scope_unit_name_still_renders(): void
+    {
+        $this->actingAsKargoziniOnlyUser();
+
+        $component = Livewire::test('kargozini.person')
+            ->set('showFilters', true)
+            ->set('filter_u_id', $this->unit->id)
+            ->set('formOpen', true)
+            ->set('u_id', $this->unit->id);
+
+        $this->assertStringContainsString($this->unit->name, $component->html());
+    }
+
+    /**
+     * An empty scope must still fail closed: `with()` compiles to
+     * `0 = 1`, so no name renders for ANY id, in or out of scope.
+     * Guards against reintroducing a `when($ids, ...)` / `! empty($ids)`
+     * spelling on the `$units` array.
+     */
+    public function test_empty_scope_renders_no_unit_name_at_all(): void
+    {
+        $nCode = (string) fake()->unique()->numerify('##########');
+        // Person with `u_id = NULL` (nullable since 2026_09_03_002219) and NO
+        // `user_units` row -> `accessibleUnitIds()` is legitimately [].
+        PersonModel::create([
+            'n_code' => $nCode, 'f_name' => 'بدون', 'l_name' => 'واحد',
+            't_id' => $this->tId, 'e_id' => $this->eId, 's_id' => $this->sId, 'r_id' => $this->rId,
+            'u_id' => null,
+        ]);
+        $unattached = User::create(['n_code' => $nCode, 'password' => Hash::make('password')]);
+        $unattached->givePermissionTo('kargozini');
+        session()->forget('current_unit_id');
+        $this->actingAs($unattached);
+
+        $component = Livewire::test('kargozini.person')
+            ->set('showFilters', true)
+            ->set('filter_u_id', $this->unit->id)
+            ->set('formOpen', true)
+            ->set('u_id', $this->unit->id)
+            // #1171: the trees only exist while their modal is open — open
+            // both, so the assertions below are about a rendered (empty)
+            // tree rather than about an absent one.
+            ->set('filterUnitModal', true)
+            ->set('unitModal', true);
+
+        $this->assertStringNotContainsString($this->unit->name, $component->html());
+        $this->assertStringNotContainsString($this->otherUnit->name, $component->html());
+    }
+
+    // -----------------------------------------------------------
+    //  رندر-on-open مودال (#1171)
+    // -----------------------------------------------------------
+
+    /**
+     * The picker builds the whole org tree in PHP (≈494 KB of HTML on the dev
+     * database) and serialises every unit into inline JSON. It is included
+     * inside `@if ($modalFlag)`, so a closed modal carries no tree at all.
+     *
+     * The page has TWO independent pickers — one for the list filter
+     * (`filter_u_id`), one for the create/edit form (`u_id`) — and they must
+     * stay independent: opening one modal must not render the other's tree.
+     * They are told apart by the model they bind to (`selected: $wire.<model>`
+     * in the picker's `x-data`), not by their node markup, which is identical.
+     */
+    public function test_the_two_unit_pickers_render_only_inside_their_own_modal(): void
+    {
+        $component = Livewire::test('kargozini.person')
+            ->assertOk();
+
+        // Both modals closed: neither tree is in the DOM. `flat:` is the
+        // picker's inline unit JSON and the only thing that emits it — a bare
+        // `toggle(` is NOT a safe probe, MaryUI's theme switcher renders
+        // `@click="toggle()"` too.
+        $this->assertSame(0, substr_count($component->html(), 'flat:'));
+
+        // Opening the FILTER modal brings the filter tree only.
+        $component->set('filterUnitModal', true);
+        $this->assertSame(1, substr_count($component->html(), 'flat:'));
+        $component->assertSeeHtml('selected: $wire.filter_u_id')
+            ->assertDontSeeHtml('selected: $wire.u_id');
+
+        // Opening the FORM modal as well brings the second tree.
+        $component->set('unitModal', true);
+        $this->assertSame(2, substr_count($component->html(), 'flat:'));
+        $component->assertSeeHtml('selected: $wire.u_id');
+
+        // Closing them again empties the DOM of both trees.
+        $component->set('filterUnitModal', false)
+            ->set('unitModal', false);
+        $this->assertSame(0, substr_count($component->html(), 'flat:'));
+    }
+}

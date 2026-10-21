@@ -1,0 +1,27 @@
+483-            ['key' => 'id', 'label' => '#', 'class' => 'w-1 hidden xl:table-cell'],
+484-            ['key' => 'name', 'label' => 'نام', 'class' => 'w-40', 'sortable' => false],
+485-            ['key' => 'n_code', 'label' => 'کد ملی', 'class' => 'w-30 hidden sm:table-cell'],
+486-            ['key' => 'unit_name', 'label' => 'واحد اصلی', 'class' => 'w-40 hidden sm:table-cell'],
+487:            ['key' => 'roles_name', 'label' => 'نقش‌ها', 'class' => 'w-70 hidden sm:table-cell'],
+488-            ['key' => 'status', 'label' => 'وضعیت', 'class' => 'w-20'],
+489-        ];
+490-    }
+491-
+492-    public function users(): LengthAwarePaginator
+493-    {
+494-        $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+495-
+--
+739-                    rounded
+740-                />
+741-            @endscope
+742-
+743:            @scope('cell_roles_name', $user)
+744-                @forelse($user->roles as $role)
+745-                    <x-badge :value="$role->label ?? $role->name" class="badge-primary" rounded />
+746-                @empty
+747-                    <span class="text-muted text-sm">—</span>
+748-                @endforelse
+749-            @endscope
+750-
+751-            @scope('actions', $user)

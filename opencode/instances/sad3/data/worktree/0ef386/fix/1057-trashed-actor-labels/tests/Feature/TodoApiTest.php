@@ -1,0 +1,478 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Http\Controllers\Api\TodoController;
+use App\Models\Todo;
+use App\Models\Unit;
+use Database\Seeders\PermissionSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
+use Tests\Support\Concerns\InteractsWithApiTokens;
+use Tests\Support\Concerns\InteractsWithTestSetup;
+use Tests\TestCase;
+
+covers(TodoController::class);
+
+class TodoApiTest extends TestCase
+{
+    use InteractsWithApiTokens;
+    use InteractsWithTestSetup;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(PermissionSeeder::class);
+        $this->seedLookupTables();
+    }
+
+    public function test_unauthenticated_user_cannot_access_todos(): void
+    {
+        $response = $this->getJson('/api/todos');
+
+        $response->assertStatus(401);
+    }
+
+    public function test_authenticated_user_can_list_todos(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        Todo::factory()->count(3)->create(['unit_id' => $unit->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet('/api/todos', $token);
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => ['id', 'title', 'start_at', 'end_at', 'is_completed', 'unit_id'],
+                ],
+            ]);
+    }
+
+    public function test_user_can_create_todo_in_accessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost('/api/todos', [
+            'title' => 'تست تسک جدید',
+            'start_at' => '2026-07-15 10:00:00',
+            'end_at' => '2026-07-20 10:00:00',
+            'unit_id' => $unit->id,
+        ], $token);
+
+        $response->assertStatus(201)
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseHas('todos', [
+            'title' => 'تست تسک جدید',
+            'unit_id' => $unit->id,
+            'user_id' => $user->id,
+        ]);
+    }
+
+    public function test_created_todo_belongs_to_authenticated_user(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost('/api/todos', [
+            'title' => 'Ownership Test',
+            'start_at' => '2026-07-15 10:00:00',
+        ], $token);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('todos', [
+            'title' => 'Ownership Test',
+            'user_id' => $user->id,
+        ]);
+    }
+
+    public function test_user_cannot_create_todo_in_inaccessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $accessibleUnit] = $this->createUserWithUnit(['calendar']);
+        $inaccessibleUnit = Unit::factory()->create(['name' => 'Inaccessible Unit']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost('/api/todos', [
+            'title' => 'Unauthorized Todo',
+            'start_at' => '2026-07-15 10:00:00',
+            'unit_id' => $inaccessibleUnit->id,
+        ], $token);
+
+        $response->assertStatus(403)
+            ->assertJson(['message' => 'Unauthorized to create todo in this unit.']);
+    }
+
+    public function test_user_can_update_own_todo(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        $todo = Todo::factory()->create([
+            'unit_id' => $unit->id,
+            'title' => 'Old Title',
+        ]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPut("/api/todos/{$todo->id}", [
+            'title' => 'Updated Title',
+            'start_at' => '2026-07-16 10:00:00',
+        ], $token);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'title' => 'Updated Title',
+                ],
+            ]);
+
+        $this->assertDatabaseHas('todos', [
+            'id' => $todo->id,
+            'title' => 'Updated Title',
+        ]);
+    }
+
+    public function test_user_can_delete_own_todo(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        $todo = Todo::factory()->create(['unit_id' => $unit->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiDelete("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(200)
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseMissing('todos', ['id' => $todo->id]);
+    }
+
+    public function test_user_can_toggle_todo_completion(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        $todo = Todo::factory()->create([
+            'unit_id' => $unit->id,
+            'is_completed' => false,
+        ]);
+        $this->assertFalse($todo->is_completed);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost("/api/todos/{$todo->id}/toggle-complete", [], $token);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'is_completed' => true,
+                ],
+            ]);
+
+        $this->assertTrue((bool) $todo->fresh()->is_completed);
+    }
+
+    public function test_todo_list_respects_jalali_date_filtering(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        Todo::factory()->create([
+            'unit_id' => $unit->id,
+            'start_at' => '2026-07-15 10:00:00',
+        ]);
+        Todo::factory()->create([
+            'unit_id' => $unit->id,
+            'start_at' => '2026-07-20 10:00:00',
+        ]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet('/api/todos?date=2026-07-15', $token);
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+    }
+
+    public function test_todo_list_filters_by_is_completed(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        Todo::factory()->create(['unit_id' => $unit->id, 'is_completed' => true]);
+        Todo::factory()->create(['unit_id' => $unit->id, 'is_completed' => false]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet('/api/todos?is_completed=true', $token);
+
+        $response->assertStatus(200);
+        $this->assertCount(1, $response->json('data'));
+    }
+
+    public function test_user_can_view_todo_in_accessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        $todo = Todo::factory()->create(['unit_id' => $unit->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'id' => $todo->id,
+                ],
+            ]);
+    }
+
+    public function test_user_cannot_view_todo_in_inaccessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $accessibleUnit] = $this->createUserWithUnit(['calendar']);
+        $inaccessibleUnit = Unit::factory()->create(['name' => 'Inaccessible Unit']);
+
+        $todo = Todo::factory()->create(['unit_id' => $inaccessibleUnit->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_user_cannot_update_todo_in_inaccessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $accessibleUnit] = $this->createUserWithUnit(['calendar']);
+        $inaccessibleUnit = Unit::factory()->create(['name' => 'Inaccessible Unit']);
+
+        $todo = Todo::factory()->create(['unit_id' => $inaccessibleUnit->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPut("/api/todos/{$todo->id}", [
+            'title' => 'Hacked Title',
+        ], $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_user_cannot_delete_todo_in_inaccessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $accessibleUnit] = $this->createUserWithUnit(['calendar']);
+        $inaccessibleUnit = Unit::factory()->create(['name' => 'Inaccessible Unit']);
+
+        $todo = Todo::factory()->create(['unit_id' => $inaccessibleUnit->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiDelete("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_user_cannot_toggle_todo_in_inaccessible_unit(): void
+    {
+        ['user' => $user, 'unit' => $accessibleUnit] = $this->createUserWithUnit(['calendar']);
+        $inaccessibleUnit = Unit::factory()->create(['name' => 'Inaccessible Unit']);
+
+        $todo = Todo::factory()->create([
+            'unit_id' => $inaccessibleUnit->id,
+            'is_completed' => false,
+        ]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost("/api/todos/{$todo->id}/toggle-complete", [], $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_todo_with_null_unit_is_denied(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+
+        $todo = Todo::factory()->create(['unit_id' => null]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        // Null-unit todos are outside any user's org scope — must be denied (issue #249)
+        $response = $this->apiGet("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_user_cannot_update_todo_with_null_unit(): void
+    {
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        $todo = Todo::factory()->create(['unit_id' => null]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPut("/api/todos/{$todo->id}", [
+            'title' => 'Hacked Title',
+        ], $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_user_cannot_delete_todo_with_null_unit(): void
+    {
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        $todo = Todo::factory()->create(['unit_id' => null]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiDelete("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_user_cannot_toggle_todo_with_null_unit(): void
+    {
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        $todo = Todo::factory()->create(['unit_id' => null, 'is_completed' => false]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost("/api/todos/{$todo->id}/toggle-complete", [], $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_creator_can_view_own_null_unit_todo(): void
+    {
+        // Null-unit contract (#838): a null-unit todo belongs to its creator —
+        // the API and the Livewire UI enforce the same rule row-for-row.
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        $todo = Todo::factory()->create(['unit_id' => null, 'user_id' => $user->id]);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'id' => $todo->id,
+                ],
+            ]);
+    }
+
+    public function test_non_creator_cannot_view_null_unit_todo(): void
+    {
+        ['user' => $creator] = $this->createUserWithUnit(['calendar']);
+        ['user' => $other] = $this->createUserWithUnit(['calendar']);
+        $todo = Todo::factory()->create(['unit_id' => null, 'user_id' => $creator->id]);
+        $token = $this->createApiToken($other, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet("/api/todos/{$todo->id}", $token);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_index_lists_creator_own_null_unit_todo(): void
+    {
+        // Null-unit contract (#917): index() must apply the same grouped
+        // predicate as show()/getEvents() — the creator's own null-unit todo
+        // belongs in the list, serialized with "unit": null.
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        $todo = Todo::factory()->create(['unit_id' => null, 'user_id' => $user->id, 'title' => 'OWN-NULL-UNIT-917']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet('/api/todos', $token);
+
+        $response->assertStatus(200)
+            ->assertJsonFragment(['id' => $todo->id, 'title' => 'OWN-NULL-UNIT-917', 'unit_id' => null, 'unit' => null]);
+    }
+
+    public function test_index_hides_foreign_null_unit_todo(): void
+    {
+        // Negative control: another user's null-unit todo stays invisible.
+        ['user' => $creator] = $this->createUserWithUnit(['calendar']);
+        ['user' => $other] = $this->createUserWithUnit(['calendar']);
+        Todo::factory()->create(['unit_id' => null, 'user_id' => $creator->id, 'title' => 'FOREIGN-NULL-UNIT-917']);
+        $token = $this->createApiToken($other, ['todos:read', 'todos:write']);
+
+        $response = $this->apiGet('/api/todos', $token);
+
+        $response->assertStatus(200)
+            ->assertJsonMissing(['title' => 'FOREIGN-NULL-UNIT-917']);
+    }
+
+    public function test_my_work_surfaces_list_own_null_unit_todo(): void
+    {
+        // Profile counters/list and global search are "my work" surfaces —
+        // they must show the viewer's own null-unit todo too.
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        Todo::factory()->create(['unit_id' => null, 'user_id' => $user->id, 'title' => 'MYWORK-NULL-917']);
+        $this->actingAs($user);
+
+        Livewire::test('profile.index')
+            ->assertSet('totalTodos', 1)
+            ->assertSee('MYWORK-NULL-917');
+
+        $results = Livewire::test('search.index')
+            ->set('query', 'MYWORK-NULL-917')
+            ->call('search')
+            ->get('results');
+
+        $this->assertContains(
+            'MYWORK-NULL-917',
+            collect($results['todos'])->pluck('title')->all(),
+            'global search shows the viewer\'s own null-unit todo'
+        );
+    }
+
+    public function test_ticket_picker_offers_own_null_unit_todo(): void
+    {
+        // The ticket picker disagreed with AccessibleTodo: the rule accepts
+        // the creator's own null-unit todo while the picker hid it.
+        ['user' => $user] = $this->createUserWithUnit(['calendar', 'create_ticket']);
+        $todo = Todo::factory()->create(['unit_id' => null, 'user_id' => $user->id, 'is_completed' => false]);
+
+        $todos = Livewire::actingAs($user)->test('tickets.create')->get('todos');
+
+        $this->assertContains(
+            $todo->id,
+            collect($todos)->pluck('id')->all(),
+            'ticket picker offers the creator\'s own null-unit todo'
+        );
+    }
+
+    public function test_todo_with_null_unit_not_created_via_store(): void
+    {
+        // Regression for issue #249: even when unit_id is omitted entirely,
+        // the controller must fall back to person->u_id and never store a null-unit todo.
+        // Here the user HAS a person with a unit, so this succeeds — proving the
+        // fallback path still works. The null-bypass is covered by the show/update/
+        // delete/toggle null-unit tests above (all expect 403).
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost('/api/todos', [
+            'title' => 'Fallback Todo',
+            'start_at' => '2026-07-15 10:00:00',
+        ], $token);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.unit_id', $unit->id);
+    }
+
+    public function test_user_can_create_todo_without_unit_id_using_person_unit(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['calendar']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        $response = $this->apiPost('/api/todos', [
+            'title' => 'Person Unit Todo',
+            'start_at' => '2026-07-15 10:00:00',
+        ], $token);
+
+        $response->assertStatus(201);
+        // Should have used the person's unit automatically
+        $this->assertEquals($unit->id, $response->json('data')['unit_id'], 'falls back to person.u_id when no unit_id provided');
+    }
+
+    public function test_delete_non_existent_todo_returns_404(): void
+    {
+        ['user' => $user] = $this->createUserWithUnit(['calendar']);
+        $token = $this->createApiToken($user, ['todos:read', 'todos:write']);
+
+        // Try to delete a non-existent todo (ID 99999)
+        $response = $this->apiDelete('/api/todos/99999', $token);
+
+        $response->assertStatus(404);
+    }
+}

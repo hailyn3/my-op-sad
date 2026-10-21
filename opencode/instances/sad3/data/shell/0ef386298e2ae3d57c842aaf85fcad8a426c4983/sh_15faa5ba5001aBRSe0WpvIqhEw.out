@@ -1,0 +1,5 @@
+## fix/1057-trashed-actor-labels...origin/fix/1057-trashed-actor-labels
+2869c19d fix(#1057): keep in-scope trashed actors in activity reports
+Code Style (Pint)	pass	1m55s	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062073	
+PHPStan Static Analysis	pass	33s	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062221	
+Tests & Coverage	pass	6m20s	https://github.com/asgarimehdi/h-dashboard/actions/runs/39647564432/job/119387062154	

@@ -1,0 +1,109 @@
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\User;
+use Illuminate\Database\Seeder;
+// use Illuminate\Database\\Console\Seeds\WithoutModelEvents;
+use Illuminate\Support\Facades\DB;
+
+class DatabaseSeeder extends Seeder
+{
+    /**
+     * Seed the application's database.
+     */
+    public function run(): void
+    {
+        // User::factory(10)->create();
+
+        // User::factory()->create([
+        //     'name' => 'Test User',
+        //     'email' => 'test@example.com',
+        // ]);
+
+        // Reference/demo data. These seeders run in every environment, so a
+        // production `migrate --seed` keeps bootstrapping its reference tables.
+        $this->call([
+            BoundarySeeder::class,
+            EstekhdamSeeder::class,
+            TahsilSeeder::class,
+            RadifSeeder::class,
+            SematSeeder::class,
+            RegionSeeder::class,
+            UnitTypeSeeder::class,
+            UnitTypeRelationshipSeeder::class,
+            UnitSeeder::class,
+            PersonsTableSeeder::class,
+        ]);
+
+        // Demo login accounts (#1036). Deliberately detached from the batch
+        // above: UsersTableSeeder refuses to run in production (it seeds three
+        // accounts with one shared, publicly-known password), and having it in
+        // the batch would abort every seeder after it there. isAllowed() keeps
+        // that decision owned by the seeder itself.
+        //
+        // It must stay *before* RoleSeeder below, which grants `admin` to users
+        // with id 1..3 — the ids these three accounts get on a fresh database.
+        if (UsersTableSeeder::isAllowed()) {
+            $this->call(UsersTableSeeder::class);
+        }
+
+        $this->call([
+            UnitCapabilitySeeder::class,
+            UserUnitSeeder::class,
+            PermissionSeeder::class,
+            RoleSeeder::class,
+            PersonUserFromDeviceSeeder::class,
+            HardwareSeeder::class,
+            HardwareHistorySeeder::class,
+            TodoSeeder::class,
+            ActivityLogSeeder::class,
+            TicketSeeder::class,
+            PersonUserSeeder::class,
+            CenterBoundarySeeder::class,
+            HealthHouseBoundarySeeder::class,
+            ZabbixDeviceSeeder::class,
+        ]);
+
+        // Reset PostgreSQL sequences after seeding to prevent unique constraint errors
+        // when manually inserted IDs differ from auto-increment values.
+        if (DB::getDriverName() === 'pgsql') {
+            $this->resetPostgresSequences();
+        }
+    }
+
+    /**
+     * Reset all PostgreSQL sequence counters to the current MAX(id) + 1.
+     * Prevents "duplicate key violates unique constraint" errors on manual ID inserts.
+     */
+    protected function resetPostgresSequences(): void
+    {
+        $tables = DB::select("
+            SELECT c.relname AS tablename, a.attname
+            FROM pg_index i
+            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            JOIN pg_class c ON c.oid = i.indrelid
+            WHERE i.indisprimary
+              AND c.relkind = 'r'
+              AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+              AND c.relname NOT IN ('spatial_ref_sys')
+              AND EXISTS (
+                  SELECT 1 FROM pg_class sc
+                  WHERE sc.relname = c.relname || '_' || a.attname || '_seq'
+                  AND sc.relkind = 'S'
+              )
+        ");
+
+        foreach ($tables as $row) {
+            $table = $row->tablename;
+            $column = $row->attname;
+
+            $seqName = "{$table}_{$column}_seq";
+            $maxId = DB::table($table)->max($column);
+
+            if ($maxId !== null) {
+                DB::statement("SELECT setval('\"{$seqName}\"', {$maxId}, true)");
+            }
+        }
+    }
+}

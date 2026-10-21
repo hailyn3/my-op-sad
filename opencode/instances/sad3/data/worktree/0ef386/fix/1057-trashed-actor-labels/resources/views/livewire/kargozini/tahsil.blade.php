@@ -1,0 +1,217 @@
+<?php
+
+use App\Models\Tahsil;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Livewire\Component;
+use Livewire\WithPagination;
+use Mary\Traits\Toast;
+
+return new class extends Component
+{
+    use Toast;
+    use WithPagination;
+
+    public $name;
+
+    public ?int $editingId = null;
+
+    public string $search = '';
+
+    public int $perPage = 20;
+
+    public bool $showForm = false;
+
+    public array $sortBy = ['column' => 'id', 'direction' => 'asc'];
+
+    // #914: `sortBy` is client-settable, so only real columns are sortable.
+    private const SORTABLE_COLUMNS = ['id', 'name'];
+
+    public function cancelEdit(): void
+    {
+        $this->resetValidation();
+        $this->reset(['name', 'editingId', 'showForm']);
+    }
+
+    public function startCreate(): void
+    {
+        $this->resetValidation();
+        $this->reset(['name', 'editingId']);
+        $this->showForm = true;
+    }
+
+    public function delete(Tahsil $tahsil): void
+    {
+        // Issue #892/#975: the route gate (`role_or_permission:kargozini`) does
+        // not run on `/livewire/update`, so this mutator re-checks it here.
+        $this->authorize('kargozini');
+
+        try {
+            $tahsil->delete();
+            $this->warning("$tahsil->name حذف شد ", 'با موفقیت', position: 'toast-bottom');
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            // Issue #892/#975: defence in depth. The `authorize()` above sits
+            // OUTSIDE this try, so the 403 never actually reaches here today —
+            // this clause exists so that a later edit which moves the check
+            // inside the try cannot turn a revoked holder's delete back into a
+            // friendly "still used in another table" toast, and so the
+            // #892/#975 static scan keeps a handle on the ordering.
+            throw $e;
+        } catch (\Exception $e) {
+            $this->error('امکان حذف وجود ندارد زیرا در جدول دیگری استفاده شده است.', position: 'toast-bottom');
+        }
+    }
+
+    public function createTahsil(): void
+    {
+        // Issue #892/#975: the route gate (`role_or_permission:kargozini`) does
+        // not run on `/livewire/update`, so this mutator re-checks it here.
+        $this->authorize('kargozini');
+
+        $this->validate([
+            'name' => 'required|string|max:255|unique:tahsils,name',
+        ]);
+
+        Tahsil::create(['name' => $this->name]);
+
+        $this->success("$this->name ایجاد شد ", 'با موفقیت', position: 'toast-bottom');
+        $this->cancelEdit();
+    }
+
+    public function editTahsil($id): void
+    {
+        // Issue #892/#975: the route gate (`role_or_permission:kargozini`) does
+        // not run on `/livewire/update`, so this mutator re-checks it here.
+        $this->authorize('kargozini');
+
+        $this->resetValidation();
+        $tahsil = Tahsil::findOrFail($id);
+        $this->editingId = (int) $id;
+        $this->name = $tahsil->name;
+        $this->showForm = false;
+    }
+
+    public function updateTahsil(): void
+    {
+        // Issue #892/#975: the route gate (`role_or_permission:kargozini`) does
+        // not run on `/livewire/update`, so this mutator re-checks it here.
+        $this->authorize('kargozini');
+
+        $this->validate([
+            'name' => 'required|string|max:255|unique:tahsils,name,'.$this->editingId,
+        ]);
+
+        try {
+            $tahsil = Tahsil::findOrFail($this->editingId);
+            $tahsil->update(['name' => $this->name]);
+
+            $this->success("$this->name بروزرسانی شد ", 'با موفقیت', position: 'toast-bottom');
+            $this->cancelEdit();
+        } catch (\Exception $e) {
+            $this->error('خطا در ویرایش', position: 'toast-bottom');
+        }
+    }
+
+    public function nameError(): ?string
+    {
+        return $this->getErrorBag()->first('name');
+    }
+
+    public function headers(): array
+    {
+        return [
+            ['key' => 'id', 'label' => '#', 'class' => 'w-1 hidden sm:table-cell'],
+            ['key' => 'name', 'label' => 'عنوان', 'class' => 'flex-1'],
+        ];
+    }
+
+    public function tahsils(): LengthAwarePaginator
+    {
+        $query = Tahsil::query();
+
+        if (! empty($this->search)) {
+            $query->where('name', 'LIKE', '%'.$this->search.'%');
+        }
+
+        $column = in_array($this->sortBy['column'] ?? '', self::SORTABLE_COLUMNS, true)
+            ? $this->sortBy['column'] : 'id';
+        $direction = ($this->sortBy['direction'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
+        $query->orderBy($column, $direction);
+
+        return $query->paginate($this->perPage);
+    }
+
+    public function with(): array
+    {
+        return [
+            'tahsils' => $this->tahsils(),
+            'headers' => $this->headers(),
+        ];
+    }
+}; ?>
+
+<div>
+    <x-header title="مدیریت وضعیت های تحصیلی" separator progress-indicator>
+        <x-slot:actions>
+            <x-theme-selector/>
+        </x-slot:actions>
+    </x-header>
+
+    <x-card shadow>
+        <div class="flex gap-2 items-center mb-4">
+            <x-ui.icon-button name="تحصیلات جدید" label="تحصیلات جدید" class="btn-success" wire:click="startCreate" responsive icon="o-plus"/>
+            <div class="flex-1">
+                <x-input
+                    placeholder="جستجو..."
+                    wire:model.live.debounce="search"
+                    clearable
+                    icon="o-magnifying-glass"
+                    class="w-full"
+                />
+            </div>
+        </div>
+
+        @if($showForm && ! $editingId)
+            <div class="flex flex-col sm:flex-row gap-2 mb-4 p-3 bg-base-200 rounded-lg items-end">
+                <div class="flex-1 w-full">
+                    <x-input wire:model="name" label="عنوان تحصیلی جدید" placeholder="عنوان" required />
+                    @error('name') <span class="text-error text-xs">{{ $message }}</span> @enderror
+                </div>
+                <div class="flex gap-2">
+                    <x-button wire:click="createTahsil" label="ذخیره" icon="o-check" class="btn-primary" spinner />
+                    <x-button wire:click="cancelEdit" label="لغو" icon="o-x-mark" class="btn-ghost" />
+                </div>
+            </div>
+        @endif
+
+        <x-table :headers="$headers" :rows="$tahsils" :sort-by="$sortBy" with-pagination per-page="perPage"
+                 :per-page-values="[10, 20, 50]">
+            @scope('cell_name', $tahsil)
+                @if($this->editingId === $tahsil->id)
+                    <div class="flex gap-2 items-center">
+                        <input
+                            type="text"
+                            wire:model="name"
+                            wire:keydown.enter="updateTahsil"
+                            class="input input-bordered input-sm flex-1"
+                            autofocus
+                        />
+                        <x-ui.icon-button name="ذخیره تحصیلات" icon="o-check" wire:click="updateTahsil" class="btn-ghost btn-sm text-success" spinner />
+                        <x-ui.icon-button name="انصراف از ویرایش" icon="o-x-mark" wire:click="cancelEdit" class="btn-ghost btn-sm" />
+                    </div>
+                    @if($this->nameError()) <span class="text-error text-xs">{{ $this->nameError() }}</span> @endif
+                @else
+                    {{ $tahsil->name }}
+                @endif
+            @endscope
+
+            @scope('actions', $tahsil)
+                <div class="flex gap-1">
+                    @if($this->editingId !== $tahsil->id)
+                        <x-ui.icon-button name="ویرایش تحصیلات" icon="o-pencil" wire:click="editTahsil({{ $tahsil->id }})" class="btn-ghost btn-sm text-primary" />
+                        <x-ui.icon-button name="حذف تحصیلات" icon="o-trash" wire:click="delete({{ $tahsil->id }})" wire:confirm="آیا مطمئن هستید؟" spinner class="btn-ghost btn-sm text-error" />
+                    @endif
+                </div>
+            @endscope
+        </x-table>
+    </x-card>
+</div>

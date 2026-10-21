@@ -1,0 +1,840 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\ActivityLog;
+use App\Models\Attachment;
+use App\Models\Notification;
+use App\Models\Person;
+use App\Models\TaskActivity;
+use App\Models\Ticket;
+use App\Models\Todo;
+use App\Models\Unit;
+use App\Models\User;
+use Database\Seeders\PermissionSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Session;
+use Livewire\Livewire;
+use Tests\Support\Concerns\InteractsWithTestSetup;
+use Tests\TestCase;
+
+covers(Ticket::class);
+
+class TicketsCreateLivewireTest extends TestCase
+{
+    use InteractsWithTestSetup;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->seed(PermissionSeeder::class);
+        $this->seedLookupTables();
+    }
+
+    /**
+     * Create a destination unit capable of receiving tickets.
+     */
+    protected function createTargetUnit(string $name = 'واحد مقصد'): Unit
+    {
+        return Unit::create([
+            'name' => $name,
+            'is_active' => true,
+            'can_receive_tickets' => true,
+        ]);
+    }
+
+    // ==================== Auth / RBAC ====================
+
+    public function test_guest_302(): void
+    {
+        $this->get('/tickets/new')->assertRedirect('/login');
+    }
+
+    public function test_unauthorized_403(): void
+    {
+        ['user' => $user] = $this->createUserWithUnit(['create_ticket']);
+        // Strip the permission back off so the route is denied.
+        $user->revokePermissionTo('create_ticket');
+
+        $this->actingAs($user)
+            ->get('/tickets/new')
+            ->assertStatus(403);
+    }
+
+    public function test_renders(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->assertOk()
+            ->assertSee('ایجاد تیکت جدید')
+            ->assertSee('موضوع تیکت')
+            ->assertSee('شرح درخواست')
+            ->assertSee('پیوست مستندات');
+    }
+
+    // ==================== mount / loadData ====================
+
+    public function test_loads_todos(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        // Open todo for current unit — should be loaded.
+        $openTodo = Todo::create([
+            'title' => 'وظیفه باز',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => $unit->id,
+        ]);
+
+        // Completed todo for current unit — should NOT be loaded.
+        Todo::create([
+            'title' => 'وظیفه بسته',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => true,
+            'unit_id' => $unit->id,
+        ]);
+
+        // Open todo for another unit — should NOT be loaded.
+        $otherUnit = Unit::create(['name' => 'سایر', 'is_active' => true]);
+        Todo::create([
+            'title' => 'وظیفه واحد دیگر',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => $otherUnit->id,
+        ]);
+
+        $component = Livewire::actingAs($user)->test('tickets.create');
+
+        $todos = $component->get('todos');
+        $this->assertCount(1, $todos);
+        $this->assertEquals($openTodo->id, $todos[0]['id']);
+    }
+
+    // ==================== Search / dropdown ====================
+
+    public function test_search_units(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $targetA = $this->createTargetUnit('بیمارستان هدف الف');
+        $targetB = $this->createTargetUnit('بیمارستان هدف ب');
+        $inactive = Unit::create([
+            'name' => 'بیمارستان غیرفعال',
+            'is_active' => false,
+            'can_receive_tickets' => true,
+        ]);
+        $noTickets = Unit::create([
+            'name' => 'بیمارستان فاقد دریافت',
+            'is_active' => true,
+            'can_receive_tickets' => false,
+        ]);
+
+        // 1 char search: should clear and not show dropdown.
+        $component = Livewire::actingAs($user)->test('tickets.create')
+            ->set('search', 'ب')
+            ->assertSet('units', [])
+            ->assertSet('unit_id', null);
+
+        // 2+ chars: only active + can_receive_tickets, excluding own unit, max 5.
+        $component->set('search', 'بیمارستان')
+            ->assertSet('showDropdown', true);
+
+        $units = $component->get('units');
+        $this->assertCount(2, $units, 'Expected 2 units, got '.count($units).': '.json_encode(array_column($units, 'id')));
+        $ids = array_column($units, 'id');
+        $this->assertContains($targetA->id, $ids);
+        $this->assertContains($targetB->id, $ids);
+        $this->assertNotContains($inactive->id, $ids);
+        $this->assertNotContains($noTickets->id, $ids);
+        $this->assertNotContains($unit->id, $ids);
+    }
+
+    public function test_select_unit(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit('واحد انتخابی');
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->call('selectUnit', $target->id, $target->name)
+            ->assertSet('unit_id', $target->id)
+            ->assertSet('search', $target->name)
+            ->assertSet('showDropdown', false);
+    }
+
+    // ==================== Reset / file ====================
+
+    public function test_reset_form_clears_fields(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('search', 'X')
+            ->set('subject', 'موضوع تست')
+            ->set('content', 'محتوای تست تست')
+            ->set('priority', 'urgent')
+            ->call('resetForm')
+            ->assertSet('subject', '')
+            ->assertSet('content', '')
+            ->assertSet('priority', 'normal')
+            ->assertSet('unit_id', null)
+            ->assertSet('search', '')
+            ->assertSet('showDropdown', false);
+    }
+
+    public function test_remove_file_clears_index(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $file1 = UploadedFile::fake()->create('doc1.pdf', 10);
+        $file2 = UploadedFile::fake()->create('doc2.pdf', 10);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('files', [$file1, $file2])
+            ->call('removeFile', 0)
+            ->assertCount('files', 1);
+    }
+
+    // ==================== saveTicket / persistence ====================
+
+    public function test_save_creates_ticket(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit('واحد مقصد اصلی');
+
+        // Notification recipient on target unit.
+        $recipientN = (string) fake()->unique()->numerify('##########');
+        Person::create([
+            'n_code' => $recipientN, 'f_name' => 'گیرنده', 'l_name' => 'تست',
+            't_id' => DB::table('tahsils')->first()->id, 'e_id' => DB::table('estekhdams')->first()->id, 's_id' => DB::table('semats')->first()->id, 'r_id' => DB::table('radifs')->first()->id,
+            'u_id' => $target->id,
+        ]);
+        $recipient = User::create(['n_code' => $recipientN, 'password' => Hash::make('password')]);
+        $recipient->units()->attach($target->id, ['role' => 'staff', 'is_primary' => true]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'تیکت تستی ایجاد')
+            ->set('content', 'این محتوای تستی برای تیکت است و بیش از ده کاراکتر دارد')
+            ->set('priority', 'urgent')
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('tickets', [
+            'unit_id' => $target->id,
+            'user_id' => $user->id,
+            'subject' => 'تیکت تستی ایجاد',
+            'priority' => 'urgent',
+            'status' => 'created',
+        ]);
+
+        // The ticket_code must match TK- prefix.
+        $ticket = Ticket::where('subject', 'تیکت تستی ایجاد')->firstOrFail();
+        $this->assertStringStartsWith('TK-', $ticket->ticket_code);
+
+        // ActivityLog + TaskActivity.
+        $this->assertDatabaseHas('activity_logs', [
+            'subject_type' => Ticket::class,
+            'subject_id' => $ticket->id,
+            'user_id' => $user->id,
+        ]);
+        $this->assertDatabaseHas('task_activities', [
+            'ticket_id' => $ticket->id,
+            'user_id' => $user->id,
+            'action' => 'created',
+            'to_unit_id' => $target->id,
+        ]);
+
+        // Notification for the recipient on the target unit.
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $recipient->id,
+            'type' => 'ticket_created',
+            'title' => 'تیکت جدید دریافت شد',
+        ]);
+
+        // Form must reset on the original component after a successful save.
+        $component = Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'موضوع اول تست ریست')
+            ->set('content', 'محتوای تستی برای ریست فرم پس از ثبت')
+            ->call('saveTicket');
+        $component->assertSet('subject', '')
+            ->assertSet('content', '')
+            ->assertSet('unit_id', null)
+            ->assertSet('search', '');
+    }
+
+    public function test_auto_creates_todo(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit('واحد تودو');
+
+        $initialTodos = Todo::count();
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'تیکت با تولید خودکار وظیفه')
+            ->set('content', 'محتوای تستی برای تولید خودکار وظیفه جدید')
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        $this->assertEquals($initialTodos + 1, Todo::count());
+
+        $todo = Todo::where('title', 'تیکت با تولید خودکار وظیفه')->firstOrFail();
+        $this->assertFalse((bool) $todo->is_completed);
+
+        // #847 (تصمیم محصول، گزینهٔ ج): the auto-created todo must sit in the
+        // creator's scope. The destination here is an unrelated unit outside
+        // it, so the todo lands in the creator's own unit — the previous
+        // assertion (`$target->id`) encoded exactly the placement this issue
+        // removes, which put the fresh link out of every reader's reach.
+        $this->assertEquals($unit->id, $todo->unit_id);
+
+        // Ticket must reference the new todo via task_id.
+        $this->assertDatabaseHas('tickets', [
+            'subject' => 'تیکت با تولید خودکار وظیفه',
+            'task_id' => $todo->id,
+        ]);
+    }
+
+    public function test_links_existing_todo_when_task_id_provided(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit('واحد با تسک موجود');
+        $existingTodo = Todo::create([
+            'title' => 'وظیفه موجود',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => $unit->id,
+        ]);
+
+        $initialTodos = Todo::count();
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', $existingTodo->id)
+            ->set('subject', 'تیکت مرتبط با وظیفه موجود')
+            ->set('content', 'محتوای تستی برای پیوند به وظیفه موجود')
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        // No new todo must be created.
+        $this->assertEquals($initialTodos, Todo::count());
+
+        $this->assertDatabaseHas('tickets', [
+            'subject' => 'تیکت مرتبط با وظیفه موجود',
+            'task_id' => $existingTodo->id,
+        ]);
+    }
+
+    // ==================== task_id scope (issue #847) ====================
+    //
+    // `task_id` was the last input on this form without any validation: it
+    // went straight from the client into `tickets.task_id`. A missing id
+    // raised `QueryException SQLSTATE[23503]`, and any real id linked the
+    // ticket to a todo in a unit the creator cannot reach — which then leaked
+    // through three read surfaces and let a unit_manager force-complete it.
+    //
+    // Product decision on #847 (option ج): `task_id` must point at a todo
+    // inside the creator's `accessibleUnitIds()`.
+    // ==================================================================
+
+    public function test_rejects_task_id_from_a_unit_outside_the_creators_scope(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+        $foreign = Unit::factory()->create();
+        $foreignTodo = Todo::create([
+            'title' => 'وظیفه واحد نامرتبط',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => $foreign->id,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', $foreignTodo->id)
+            ->set('subject', 'تیکت با وظیفه نامرتبط')
+            ->set('content', 'محتوای تستی برای بررسی دامنه وظیفه')
+            ->call('saveTicket')
+            ->assertHasErrors(['task_id']);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت با وظیفه نامرتبط']);
+    }
+
+    public function test_rejects_nonexistent_task_id_without_a_database_error(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+
+        // A missing id used to violate the FK: SQLSTATE[23503] plus a 500 for
+        // the user, and the aborted transaction poisoned the next query (25P02).
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', 999999)
+            ->set('subject', 'تیکت با وظیفه ناموجود')
+            ->set('content', 'محتوای تستی برای بررسی وظیفه ناموجود')
+            ->call('saveTicket')
+            ->assertHasErrors(['task_id'])
+            ->assertStatus(200);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت با وظیفه ناموجود']);
+    }
+
+    public function test_rejects_completed_todo_as_task(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+        $done = Todo::create([
+            'title' => 'وظیفه تمام‌شده',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => true,
+            'unit_id' => $unit->id,
+        ]);
+
+        // The picker only ever offered open todos, so accepting a completed one
+        // was always a server/UI disagreement — and it would immediately
+        // satisfy the "all tickets of this task are done" condition.
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', $done->id)
+            ->set('subject', 'تیکت با وظیفه تمام‌شده')
+            ->set('content', 'محتوای تستی برای بررسی وظیفه تمام‌شده')
+            ->call('saveTicket')
+            ->assertHasErrors(['task_id']);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت با وظیفه تمام‌شده']);
+    }
+
+    public function test_accepts_task_id_from_another_unit_inside_the_creators_scope(): void
+    {
+        // The decision is the creator's whole reachable scope, not just the
+        // current unit — a child unit's todo is a legitimate pick.
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $child = Unit::factory()->create(['parent_id' => $unit->id]);
+        Unit::find($unit->id)->update(['parent_id' => null]);
+        $target = $this->createTargetUnit();
+
+        $scopedTodo = Todo::create([
+            'title' => 'وظیفه واحد فرزند',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => $child->id,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', $scopedTodo->id)
+            ->set('subject', 'تیکت با وظیفه در اسکوپ')
+            ->set('content', 'محتوای تستی برای پیوند به وظیفه در اسکوپ')
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('tickets', [
+            'subject' => 'تیکت با وظیفه در اسکوپ',
+            'task_id' => $scopedTodo->id,
+        ]);
+    }
+
+    public function test_creator_can_link_a_null_unit_todo_they_created(): void
+    {
+        // #838 contract: a null-unit todo belongs to its creator.
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+        $orphan = Todo::create([
+            'title' => 'وظیفه بی‌واحد من',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => null,
+            'user_id' => $user->id,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', $orphan->id)
+            ->set('subject', 'تیکت با وظیفه بی‌واحد خودم')
+            ->set('content', 'محتوای تستی برای پیوند به وظیفه بی‌واحد')
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('tickets', [
+            'subject' => 'تیکت با وظیفه بی‌واحد خودم',
+            'task_id' => $orphan->id,
+        ]);
+    }
+
+    public function test_creator_cannot_link_another_users_null_unit_todo(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+        // `todos.user_id` FKs to `users.id`, not `persons`.
+        $otherUser = User::factory()->create();
+        $orphan = Todo::create([
+            'title' => 'وظیفه بی‌واحد دیگری',
+            'start_at' => now(),
+            'end_at' => now()->addWeek(),
+            'is_completed' => false,
+            'unit_id' => null,
+            'user_id' => $otherUser->id,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('task_id', $orphan->id)
+            ->set('subject', 'تیکت با وظیفه بی‌واحد دیگری')
+            ->set('content', 'محتوای تستی برای بررسی وظیفه بی‌واحد دیگری')
+            ->call('saveTicket')
+            ->assertHasErrors(['task_id']);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت با وظیفه بی‌واحد دیگری']);
+    }
+
+    // ==================== priority (issue #847) ====================
+
+    public function test_rejects_priority_outside_the_allowed_set(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+
+        // `medium` and `high` pass the DB CHECK constraint but are not offered
+        // by the picker and are refused by `TicketController`; anything else
+        // used to raise SQLSTATE[23514].
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('priority', 'medium')
+            ->set('subject', 'تیکت با فوریت نامعتبر')
+            ->set('content', 'محتوای تستی برای بررسی سطح فوریت')
+            ->call('saveTicket')
+            ->assertHasErrors(['priority']);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت با فوریت نامعتبر']);
+    }
+
+    // ==================== picker (issue #847) ====================
+
+    public function test_picker_offers_only_open_todos_in_the_creators_scope(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        $foreign = Unit::factory()->create();
+        $mine = Todo::create(['title' => 'وظیفه من', 'start_at' => now(), 'is_completed' => false, 'unit_id' => $unit->id]);
+        $done = Todo::create(['title' => 'وظیفه تمام‌شده', 'start_at' => now(), 'is_completed' => true, 'unit_id' => $unit->id]);
+        $theirs = Todo::create(['title' => 'وظیفه آن‌ها', 'start_at' => now(), 'is_completed' => false, 'unit_id' => $foreign->id]);
+        $orphan = Todo::create(['title' => 'وظیفه بی‌واحد غریبه', 'start_at' => now(), 'is_completed' => false, 'unit_id' => null, 'user_id' => null]);
+
+        $todos = Livewire::actingAs($user)->test('tickets.create')->get('todos');
+
+        $ids = collect($todos)->pluck('id');
+
+        $this->assertTrue($ids->contains($mine->id));
+        $this->assertFalse($ids->contains($done->id), 'a completed todo must not be offered');
+        $this->assertFalse($ids->contains($theirs->id), 'a foreign-unit todo must not be offered');
+        $this->assertFalse($ids->contains($orphan->id), 'an orphan todo must not be offered');
+    }
+
+    public function test_picker_is_bounded(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        foreach (range(1, 60) as $i) {
+            Todo::create(['title' => "وظیفه {$i}", 'start_at' => now(), 'is_completed' => false, 'unit_id' => $unit->id]);
+        }
+
+        $todos = Livewire::actingAs($user)->test('tickets.create')->get('todos');
+
+        // Previously unbounded — every todo in the unit came back and was
+        // serialized as a public Livewire property.
+        $this->assertLessThanOrEqual(50, count($todos));
+    }
+
+    // ==================== auto-create placement (issue #847) ====================
+
+    public function test_auto_created_todo_stays_in_scope_when_destination_is_outside_it(): void
+    {
+        ['user' => $user, 'unit' => $unit] = $this->createUserWithUnit(['create_ticket']);
+        Session::put('current_unit_id', $unit->id);
+
+        // The destination is a plain, unrelated, ticket-receiving unit, so it
+        // is outside the creator's scope. The todo must land in the creator's
+        // own unit instead — otherwise the freshly linked task is itself
+        // invisible on every read surface.
+        $target = $this->createTargetUnit('واحد مقصد بیرون از اسکوپ');
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'تیکت با خودکارسازی')
+            ->set('content', 'محتوای تستی برای بررسی محل ساخت وظیفه')
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        $todo = Todo::where('title', 'تیکت با خودکارسازی')->firstOrFail();
+
+        $this->assertSame($unit->id, $todo->unit_id);
+    }
+
+    public function test_attachments_are_persisted(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit('واحد پیوست');
+
+        StorageFake();
+
+        $file = UploadedFile::fake()->create('report.pdf', 10, 'application/pdf');
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'تیکت با پیوست')
+            ->set('content', 'محتوای تستی برای بررسی پیوست فایل')
+            ->set('files', [$file])
+            ->call('saveTicket')
+            ->assertHasNoErrors();
+
+        $ticket = Ticket::where('subject', 'تیکت با پیوست')->firstOrFail();
+        $this->assertEquals(1, Attachment::where('ticket_id', $ticket->id)->count());
+        $this->assertDatabaseHas('attachments', [
+            'ticket_id' => $ticket->id,
+            'user_id' => $user->id,
+            'file_name' => 'report.pdf',
+        ]);
+    }
+
+    // ==================== Validation ====================
+
+    public function test_validation_errors(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        // Empty payload → 3 required errors.
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->call('saveTicket')
+            ->assertHasErrors(['unit_id', 'subject', 'content']);
+    }
+
+    public function test_validation_min_max_lengths(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = $this->createTargetUnit();
+
+        // subject too short, content too short
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'abc')
+            ->set('content', 'short')
+            ->call('saveTicket')
+            ->assertHasErrors(['subject', 'content']);
+    }
+
+    public function test_own_unit_rejected(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        // The user's own unit — must be rejected by the custom rule.
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $unit->id)
+            ->set('subject', 'ارسال به واحد خود')
+            ->set('content', 'محتوای تستی رد شدن ارسال به واحد خود')
+            ->call('saveTicket')
+            ->assertHasErrors(['unit_id']);
+
+        // No ticket must have been created.
+        $this->assertDatabaseMissing('tickets', ['subject' => 'ارسال به واحد خود']);
+    }
+
+    public function test_unit_id_required_and_exists(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        // Pick a non-existent unit id.
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', 99999)
+            ->set('subject', 'تیکت تستی واحد نامعتبر')
+            ->set('content', 'محتوای تستی برای واحد نامعتبر در ولیدیشن')
+            ->call('saveTicket')
+            ->assertHasErrors(['unit_id']);
+    }
+
+    public function test_file_validation_rejects_too_many_files(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $files = [
+            UploadedFile::fake()->create('a.pdf', 10),
+            UploadedFile::fake()->create('b.pdf', 10),
+            UploadedFile::fake()->create('c.pdf', 10),
+            UploadedFile::fake()->create('d.pdf', 10),
+            UploadedFile::fake()->create('e.pdf', 10),
+            UploadedFile::fake()->create('f.pdf', 10),
+        ];
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('files', $files)
+            ->assertHasErrors(['files'])
+            ->assertSet('files', []);
+    }
+
+    // =====================================================================
+    // Issue #818 — the destination unit must be an eligible one
+    // =====================================================================
+
+    public function test_save_rejects_unit_that_cannot_receive_tickets(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = Unit::create([
+            'name' => 'واحد غیرقابل دریافت',
+            'is_active' => true,
+            'can_receive_tickets' => false,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'تیکت به واحد غیرقابل دریافت')
+            ->set('content', 'محتوای تستی برای واحد غیرقابل دریافت تیکت')
+            ->call('saveTicket')
+            ->assertHasErrors(['unit_id']);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت به واحد غیرقابل دریافت']);
+    }
+
+    public function test_save_rejects_inactive_unit(): void
+    {
+        $result = $this->createUserWithUnit(['create_ticket']);
+        $user = $result['user'];
+        $unit = $result['unit'];
+        Session::put('current_unit_id', $unit->id);
+
+        $target = Unit::create([
+            'name' => 'واحد غیرفعال مقصد',
+            'is_active' => false,
+            'can_receive_tickets' => true,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test('tickets.create')
+            ->set('unit_id', $target->id)
+            ->set('subject', 'تیکت به واحد غیرفعال')
+            ->set('content', 'محتوای تستی برای واحد غیرفعال دریافت تیکت')
+            ->call('saveTicket')
+            ->assertHasErrors(['unit_id']);
+
+        $this->assertDatabaseMissing('tickets', ['subject' => 'تیکت به واحد غیرفعال']);
+    }
+}
+
+if (! function_exists('Tests\Feature\StorageFake')) {
+    function StorageFake(): void
+    {
+        // Helper no-op — Livewire's WithFileUploads uses Storage::fake('public')
+        // in setUp of feature tests via automatic framework boot; this stub keeps
+        // the test fluent without dragging the facade into every test method.
+    }
+}

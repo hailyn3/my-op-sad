@@ -1,0 +1,195 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Person;
+use App\Models\Unit;
+use App\Models\User;
+use App\Services\AccessService;
+use App\Services\CacheInvalidationServiceInterface;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Session;
+use Tests\Support\Concerns\InteractsWithTestSetup;
+use Tests\TestCase;
+
+covers(AccessService::class);
+
+class AccessServiceTest extends TestCase
+{
+    use InteractsWithTestSetup;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seedLookupTables();
+        Session::flush();
+        // Ensure cache driver is array for predictable assertions.
+        config(['cache.default' => 'array']);
+    }
+
+    private function makeUserInUnit(Unit $unit): User
+    {
+        $tId = DB::table('tahsils')->first()->id;
+        $eId = DB::table('estekhdams')->first()->id;
+        $sId = DB::table('semats')->first()->id;
+        $rId = DB::table('radifs')->first()->id;
+        $nCode = (string) fake()->unique()->numerify('##########');
+        Person::create([
+            'n_code' => $nCode, 'f_name' => 'A', 'l_name' => 'B',
+            't_id' => $tId, 'e_id' => $eId, 's_id' => $sId, 'r_id' => $rId,
+            'u_id' => $unit->id,
+        ]);
+
+        return User::create(['n_code' => $nCode, 'password' => Hash::make('password')]);
+    }
+
+    public function test_accessible_unit_ids_returns_units_with_descendants(): void
+    {
+        $parent = Unit::create(['name' => 'Parent']);
+        $child = Unit::create(['name' => 'Child', 'parent_id' => $parent->id]);
+        $user = $this->makeUserInUnit($parent);
+        $user->units()->attach($parent->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $parent->id);
+        $this->actingAs($user);
+
+        $ids = app(AccessService::class)->accessibleUnitIds($user);
+
+        $this->assertContains($parent->id, $ids);
+        $this->assertContains($child->id, $ids);
+    }
+
+    public function test_accessible_unit_ids_returns_empty_for_guest(): void
+    {
+        $ids = app(AccessService::class)->accessibleUnitIds(null);
+
+        $this->assertEmpty($ids);
+    }
+
+    public function test_accessible_unit_ids_falls_back_to_person_unit_when_no_session(): void
+    {
+        $unit = Unit::create(['name' => 'Only Unit']);
+        $user = $this->makeUserInUnit($unit);
+        $user->units()->attach($unit->id, ['role' => 'staff', 'is_primary' => true]);
+        // No current_unit_id set in session -> should fall back to user's person unit.
+        $this->actingAs($user);
+
+        $ids = app(AccessService::class)->accessibleUnitIds($user);
+
+        $this->assertContains($unit->id, $ids);
+    }
+
+    public function test_clear_cache_bumps_version(): void
+    {
+        $unit = Unit::create(['name' => 'CU']);
+        $user = $this->makeUserInUnit($unit);
+        $user->units()->attach($unit->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $unit->id);
+        $this->actingAs($user);
+
+        $before = app(CacheInvalidationServiceInterface::class)->getVersion('unit_hierarchy');
+
+        app(AccessService::class)->clearCache($user);
+
+        $after = app(CacheInvalidationServiceInterface::class)->getVersion('unit_hierarchy');
+
+        $this->assertGreaterThan($before, $after);
+    }
+
+    public function test_clear_all_caches_bumps_multiple_versions(): void
+    {
+        $unit = Unit::create(['name' => 'CAU']);
+        $user = $this->makeUserInUnit($unit);
+
+        $gisBefore = app(CacheInvalidationServiceInterface::class)->getVersion('gis');
+        $unitBefore = app(CacheInvalidationServiceInterface::class)->getVersion('unit_hierarchy');
+
+        app(AccessService::class)->clearAllCaches();
+
+        $gisAfter = app(CacheInvalidationServiceInterface::class)->getVersion('gis');
+        $unitAfter = app(CacheInvalidationServiceInterface::class)->getVersion('unit_hierarchy');
+
+        $this->assertGreaterThan($gisBefore, $gisAfter);
+        $this->assertGreaterThan($unitBefore, $unitAfter);
+    }
+
+    public function test_scope_reduction_takes_effect_immediately(): void
+    {
+        $parent = Unit::create(['name' => 'Parent']);
+        $child = Unit::create(['name' => 'Child', 'parent_id' => $parent->id]);
+        $user = $this->makeUserInUnit($parent);
+        $user->units()->attach($parent->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $parent->id);
+        $this->actingAs($user);
+
+        // Initially accessible to both parent and child
+        $ids = app(AccessService::class)->accessibleUnitIds($user);
+        $this->assertContains($child->id, $ids);
+
+        // Reduce scope: detach parent, attach only a new unit
+        $newUnit = Unit::create(['name' => 'New Unit']);
+        $user->units()->detach($parent->id);
+        $user->units()->attach($newUnit->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $newUnit->id);
+
+        // Clear cache to simulate what should happen
+        app(AccessService::class)->clearCache($user);
+
+        // Should immediately reflect reduced scope
+        $newIds = app(AccessService::class)->accessibleUnitIds($user);
+        $this->assertNotContains($child->id, $newIds);
+        $this->assertContains($newUnit->id, $newIds);
+    }
+
+    public function test_accessible_unit_ids_is_cached_per_user(): void
+    {
+        $unit = Unit::create(['name' => 'Cached Unit']);
+        $user = $this->makeUserInUnit($unit);
+        $user->units()->attach($unit->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $unit->id);
+        $this->actingAs($user);
+
+        $first = app(AccessService::class)->accessibleUnitIds($user);
+        $second = app(AccessService::class)->accessibleUnitIds($user);
+
+        $this->assertEquals($first, $second);
+        $this->assertCount(1, $first);
+    }
+
+    public function test_accessible_unit_ids_cache_key_independent_of_base_units_order(): void
+    {
+        $parent1 = Unit::create(['name' => 'Parent 1']);
+        $parent2 = Unit::create(['name' => 'Parent 2']);
+        $child1 = Unit::create(['name' => 'Child 1', 'parent_id' => $parent1->id]);
+        $child2 = Unit::create(['name' => 'Child 2', 'parent_id' => $parent2->id]);
+        $user = $this->makeUserInUnit($parent1);
+        // Attach both parent units to user (no current_unit_id set)
+        $user->units()->attach($parent1->id, ['role' => 'staff', 'is_primary' => true]);
+        $user->units()->attach($parent2->id, ['role' => 'staff', 'is_primary' => false]);
+        // No current_unit_id -> baseUnitIds = [$parent1->id, $parent2->id] (order from pluck)
+        $this->actingAs($user);
+
+        Cache::put('unit_hierarchy_version', 0);
+
+        // First call - baseUnitIds order depends on DB pluck order
+        $first = app(AccessService::class)->accessibleUnitIds($user);
+
+        // Clear user's session to force re-derivation (but keep cache version same)
+        Session::forget('current_unit_id');
+
+        // Second call - should hit same cache regardless of pluck order
+        DB::enableQueryLog();
+        $second = app(AccessService::class)->accessibleUnitIds($user);
+        $queries = DB::getQueryLog();
+
+        $this->assertEqualsCanonicalizing($first, $second);
+        $this->assertNotEmpty($first);
+
+        // Filter to only CTE queries (descendant recursive CTE query used by AccessService)
+        $cteQueries = array_filter($queries, fn ($q) => str_contains($q['query'] ?? '', 'WITH RECURSIVE unit_tree'));
+        $this->assertCount(0, $cteQueries, 'No new CTE query should run for different baseUnitIds order');
+    }
+}

@@ -1,0 +1,243 @@
+<?php
+
+namespace App\Observers;
+
+use App\Models\Hardware;
+use App\Models\HardwareAudit;
+use App\Support\ExcelCell;
+use App\Support\HardwareAuditChange;
+use Illuminate\Support\Facades\Auth;
+
+class HardwareAuditObserver
+{
+    /**
+     * Check if audit logging should be suppressed.
+     *
+     * Supports both static flag (standard PHP-FPM) and request attributes
+     * (Laravel Octane / long-running workers).
+     */
+    protected function shouldSuppress(): bool
+    {
+        return Hardware::$suppressAudit
+            || request()->attributes->get('suppress_audit', false);
+    }
+
+    /**
+     * Handle the Hardware "created" event.
+     */
+    public function created(Hardware $hardware): void
+    {
+        if ($this->shouldSuppress()) {
+            return;
+        }
+
+        $fields = HardwareAuditChange::AUDITED_FIELDS;
+        $changes = [];
+        foreach ($fields as $field) {
+            $value = $hardware->getAttribute($field);
+            if ($value !== null && $value !== '') {
+                $changes[] = [
+                    'field' => $field,
+                    'old' => '—',
+                    'new' => $this->formatValueForDisplay($value),
+                ];
+            }
+        }
+        $this->recordAudit($hardware, 'created', $changes ?: null, $this->detectSource());
+    }
+
+    /**
+     * Handle the Hardware "updated" event.
+     *
+     * We use `updating` (fires BEFORE the model syncs its changes)
+     * because in `updated` the dirty attributes are already cleared.
+     */
+    public function updating(Hardware $hardware): void
+    {
+        if ($this->shouldSuppress()) {
+            return;
+        }
+
+        $changes = $this->getChangedFields($hardware);
+
+        if (! empty($changes)) {
+            $this->recordAudit($hardware, 'updated', $changes, $this->detectSource());
+        }
+    }
+
+    /**
+     * Handle the Hardware "deleted" event.
+     */
+    public function deleting(Hardware $hardware): void
+    {
+        if ($this->shouldSuppress()) {
+            return;
+        }
+
+        $hardwareId = $hardware->id;
+        $this->recordAudit($hardware, 'deleted', null, $this->detectSource(), $hardwareId);
+    }
+
+    /**
+     * Handle the Hardware "forceDeleted" event.
+     */
+    public function forceDeleted(Hardware $hardware): void
+    {
+        if ($this->shouldSuppress()) {
+            return;
+        }
+
+        $this->recordAudit($hardware, 'force_deleted', null, $this->detectSource());
+    }
+
+    /**
+     * Record a bulk operation audit entry (bulk_mark / bulk_delete).
+     * Used by the API controller for bulk actions so each affected
+     * hardware record gets its own audit row.
+     */
+    public function recordBulkAudit(Hardware $hardware, string $action, ?array $changes): void
+    {
+        $this->recordAudit($hardware, $action, $changes, 'bulk');
+    }
+
+    /**
+     * Record a rollback audit entry (creates a new audit row for traceability).
+     */
+    public function recordRollbackAudit(Hardware $hardware, array $rollbackChanges, ?int $userId = null): void
+    {
+        HardwareAudit::create([
+            'hardware_id' => $hardware->id,
+            'user_id' => $userId ?? Auth::id(),
+            'action' => 'rollback',
+            'changes' => $this->sanitizeChanges($rollbackChanges),
+            'source' => $this->detectSource(),
+            'ip_address' => request()?->ip(),
+            // #886 (CWE-1236): user_agent is attacker-controlled; neutralise
+            // '='-leading values at the source so the payload never persists.
+            'user_agent' => ExcelCell::escape(request()?->userAgent()),
+        ]);
+    }
+
+    /**
+     * Detect the source of the change (web, api, import, bulk).
+     */
+    protected function detectSource(): string
+    {
+        $route = request()->route();
+
+        if ($route && $route->getName() === 'hardware.import') {
+            return 'import';
+        }
+
+        if ($route && str_starts_with($route->uri(), 'api/')) {
+            return 'api';
+        }
+
+        return 'web';
+    }
+
+    /**
+     * Record an audit entry for the hardware.
+     */
+    protected function recordAudit(Hardware $hardware, string $action, ?array $changes, string $source, ?int $hardwareId = null): void
+    {
+        $user = Auth::user();
+        $request = request();
+
+        HardwareAudit::create([
+            'hardware_id' => $hardwareId ?? $hardware->id,
+            'user_id' => $user?->id,
+            'action' => $action,
+            'changes' => $this->sanitizeChanges($changes),
+            'source' => $source,
+            'ip_address' => $request?->ip(),
+            // #886 (CWE-1236): see recordRollbackAudit.
+            'user_agent' => ExcelCell::escape($request?->userAgent()),
+        ]);
+    }
+
+    /**
+     * Neutralise formula-injection payloads in stored change values (#886,
+     * CWE-1236) so a later export serves text, not a live formula.
+     *
+     * @param  array<int, mixed>|null  $changes
+     * @return array<int, mixed>|null
+     */
+    protected function sanitizeChanges(?array $changes): ?array
+    {
+        if ($changes === null) {
+            return null;
+        }
+
+        return array_map(
+            fn ($entry) => is_array($entry)
+                ? array_map(
+                    fn ($value) => is_string($value) ? ExcelCell::escape($value) : $value,
+                    $entry
+                )
+                : $entry,
+            $changes
+        );
+    }
+
+    /**
+     * Get changed fields with old and new values.
+     */
+    protected function getChangedFields(Hardware $hardware): array
+    {
+        $dirty = $hardware->getDirty();
+        $original = $hardware->getOriginal();
+
+        $changes = [];
+
+        foreach ($dirty as $field => $newValue) {
+            // Ignore auto-managed timestamp fields
+            if (in_array($field, ['updated_at', 'created_at'], true)) {
+                continue;
+            }
+
+            // Use array_key_exists so null→value transitions are captured
+            $oldValue = array_key_exists($field, $original) ? $original[$field] : null;
+
+            // Normalize values for comparison
+            $normalizedOld = $this->normalizeValue($oldValue);
+            $normalizedNew = $this->normalizeValue($newValue);
+
+            if ($normalizedOld !== $normalizedNew) {
+                $changes[] = [
+                    'field' => $field,
+                    'old' => $this->formatValueForDisplay($oldValue),
+                    'new' => $this->formatValueForDisplay($newValue),
+                ];
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Normalize a value for comparison.
+     */
+    protected function normalizeValue(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        return (string) $value;
+    }
+
+    /**
+     * Format a value for display in the changes log.
+     *
+     * Delegates to {@see HardwareAuditChange} so `created` and the `bulk_delete`
+     * snapshot render a value identically (#927).
+     */
+    protected function formatValueForDisplay(mixed $value): string
+    {
+        return HardwareAuditChange::formatValueForDisplay($value);
+    }
+}

@@ -1,0 +1,53 @@
+<?php
+
+namespace App\Models;
+
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
+/**
+ * @property int $id
+ * @property mixed|null $boundary
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property-read string|null $geojson
+ * @property-read Unit|null $unit
+ *
+ * @method static \Illuminate\Database\Eloquent\Builder<static> where(string $column, mixed $value)
+ */
+class Boundary extends Model
+{
+    protected $table = 'boundaries';
+
+    protected $fillable = ['boundary'];
+
+    /**
+     * ارتباط با جدول unit
+     */
+    public function unit(): HasOne
+    {
+        return $this->hasOne(Unit::class);
+    }
+
+    protected $appends = ['geojson'];
+
+    public function getGeojsonAttribute()
+    {
+        // Use the already loaded 'boundary' attribute if available to avoid N+1 queries
+        if ($this->relationLoaded('boundary') || array_key_exists('boundary', $this->getAttributes())) {
+            $boundary = $this->getAttribute('boundary');
+            if ($boundary) {
+                return \DB::selectOne('SELECT ST_AsGeoJSON(ST_GeomFromEWKB(decode(?, \'hex\'))) as geojson', [$boundary])->geojson ?? null;
+            }
+
+            return null;
+        }
+
+        // Fallback: query the database (this path triggers N+1 if used in a loop without eager loading)
+        return \DB::table('boundaries')
+            ->where('id', $this->id)
+            ->selectRaw('ST_AsGeoJSON(boundary) as geojson')
+            ->value('geojson');
+    }
+}

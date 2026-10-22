@@ -1,0 +1,174 @@
+<?php
+
+use Livewire\Component;
+
+return new class extends Component {
+    public string $outItemId;
+    public string $inItemId;
+    public string $title;
+    public int $initialDuration;
+
+    public function mount($outItemId, $inItemId, $title = 'Traffic', $initialDuration = 3600): void
+    {
+        $this->outItemId = $outItemId;
+        $this->inItemId = $inItemId;
+        $this->title = $title;
+        $this->initialDuration = $initialDuration;
+    }
+};
+?>
+
+<div wire:key="traffic-{{ $outItemId }}-{{ $inItemId }}"
+     x-data="initTrafficChart('{{ $outItemId }}', '{{ $inItemId }}', '{{ $title }}', {{ $initialDuration }})"
+     x-init="start($el)"
+     class="relative">
+
+    <div class="flex items-center gap-2 mb-2">
+        <span class="text-sm font-medium">مدت زمان:</span>
+        <select x-model="duration" @change="reload()" class="select select-bordered select-sm">
+            <option value="1800">30 دقیقه</option>
+            <option value="3600">1 ساعت</option>
+            <option value="7200">2 ساعت</option>
+            <option value="14400">4 ساعت</option>
+            <option value="21600">6 ساعت</option>
+            <option value="43200">12 ساعت</option>
+            <option value="86400">24 ساعت</option>
+        </select>
+    </div>
+
+    <div x-ref="container" class="w-full h-[300px]"></div>
+
+    <!-- #703: when Zabbix is unreachable the chart was silently blank. Surface
+         the requested friendly message instead of an unexplained empty chart. -->
+    <div x-show="error" x-cloak class="text-sm text-error mt-2" x-text="error"></div>
+
+    <div x-show="loading" x-cloak
+         class="absolute inset-0 flex items-center justify-center bg-base-100/50 z-10 rounded-lg">
+        <span class="loading loading-spinner loading-lg text-primary"></span>
+    </div>
+</div>
+
+@assets
+<script src="{{ asset('js/chart/highcharts.js') }}"></script>
+<style>
+    [x-cloak] { display: none !important; }
+</style>
+
+<script>
+    // پاکسازی همه chartهای قبلی
+    Highcharts.charts.forEach(chart => {
+        if (chart) chart.destroy();
+    });
+
+    // غیرفعال کردن accessibility
+    Highcharts.setOptions({
+        accessibility: { enabled: false }
+    });
+
+    window.initTrafficChart = function(outItemId, inItemId, chartTitle, initialDuration) {
+        return {
+            outItemId, inItemId, chartTitle,
+            duration: initialDuration,
+            loading: false,
+            error: null,
+            chart: null,
+            timer: null,
+
+            start(el) {
+                this.$nextTick(() => {
+                    const container = el.querySelector('[x-ref="container"]');
+                    if (!container) return;
+
+                    container.innerHTML = '';
+
+                    this.chart = Highcharts.chart(container, {
+                        chart: {
+                            type: 'spline',
+                            backgroundColor: 'transparent',
+                            animation: false
+                        },
+                        title: {
+                            text: this.chartTitle,
+                            style: { color: "var(--color-primary)" }
+                        },
+                        xAxis: { type: 'datetime' },
+                        yAxis: { title: { text: 'Mbps' } },
+                        tooltip: { valueSuffix: ' Mbps' },
+                        credits: { enabled: false },
+                        accessibility: { enabled: false },
+                        series: [{
+                            name: 'Outgoing',
+                            data: [],
+                            color: "var(--color-warning)"
+                        }, {
+                            name: 'Incoming',
+                            data: [],
+                            color: "var(--color-primary)"
+                        }]
+                    });
+
+                    this.load();
+                    // ۶۰ ثانیه، نه ۱۰: هر نمودار یک درخواست به `/api/zabbix/traffic`
+                    // می‌زند و این مسیر زیر `throttle:api-user` است (۶۰ درخواست در
+                    // دقیقه برای کل کاربر). با ۲۵ شبکه و چرخهٔ ۱۰ ثانیه‌ای یعنی
+                    // ۱۵۰ درخواست در دقیقه و ۴۲۹ قطعی. بازهٔ زمانی نمودار از ۳۰
+                    // دقیقه شروع می‌شود، پس تازه‌سازی دقیقه‌ای کافی است.
+                    this.timer = setInterval(() => this.load(), 60000);
+                });
+            },
+
+            reload() {
+                this.load(true);
+            },
+
+            async load(show = false) {
+                if (!this.chart) return;
+                if (show) this.loading = true;
+                this.error = null;
+
+                try {
+                    const url = `/api/zabbix/traffic?out_item_id=${this.outItemId}&in_item_id=${this.inItemId}&duration=${this.duration}`;
+                    const res = await fetch(url);
+
+                    // #703: 503 means Zabbix is unreachable — show the requested
+                    // friendly message, not a silent empty chart. Other statuses
+                    // keep their existing behaviour so real bugs stay visible.
+                    if (res.status === 503) {
+                        this.error = 'دسترسی به سرور مقدور نمی باشد';
+                        return;
+                    }
+
+                    const data = await res.json();
+
+                    if (this.chart && this.chart.series) {
+                        this.chart.series[0].setData(data.out || [], false);
+                        this.chart.series[1].setData(data.in || [], false);
+                        this.chart.redraw(false);
+                    }
+                } catch(e) {
+                    console.error(e);
+
+                    // #703: a TypeError means the request never reached the
+                    // server (offline / network down) — the same condition.
+                    if (e instanceof TypeError) {
+                        this.error = 'دسترسی به سرور مقدور نمی باشد';
+                        return;
+                    }
+
+                    this.error = 'خطا در دریافت داده‌های ترافیک';
+                } finally {
+                    if (show) this.loading = false;
+                }
+            },
+
+            destroy() {
+                clearInterval(this.timer);
+                if (this.chart) {
+                    this.chart.destroy();
+                    this.chart = null;
+                }
+            }
+        };
+    };
+</script>
+@endassets

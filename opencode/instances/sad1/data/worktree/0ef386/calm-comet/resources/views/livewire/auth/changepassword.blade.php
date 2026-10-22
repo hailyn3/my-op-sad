@@ -1,0 +1,112 @@
+<?php
+
+use Livewire\Component;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
+use Mary\Traits\Toast;
+
+return new class extends Component {
+    use Toast;
+
+    public string $currentPassword = '';
+    public string $newPassword = '';
+    public string $newPasswordConfirmation = '';
+
+    public function rules()
+    {
+        return [
+            'currentPassword' => 'required',
+            'newPassword' => 'required|min:8|different:currentPassword',
+            'newPasswordConfirmation' => 'required|same:newPassword',
+        ];
+    }
+
+    public function changePassword(): void
+    {
+        $this->validate();
+
+        $user = auth()->user();
+
+        // چک کردن رمز فعلی
+        if (!Hash::check($this->currentPassword, $user->password)) {
+            throw ValidationException::withMessages([
+                'currentPassword' => 'رمز فعلی اشتباه است.',
+            ]);
+        }
+
+        // #1004: بستن نشست های وبِ دیگر روی دستگاه ها، پیش از تغییر رمز. این متد
+        // رمز فعلی را وریفای می کند، پس باید پیش از ذخیرهٔ رمز جدید اجرا شود.
+        // با FQCN صدا زده می شود تا افزودنِ یک import، شمارهٔ خطِ رکوردهای
+        // phpstan-baseline این فایل را جابجا نکند.
+        \Illuminate\Support\Facades\Auth::logoutOtherDevices($this->currentPassword);
+
+        // تغییر رمز و ذخیره‌سازی
+        $user->password = Hash::make($this->newPassword);
+        $user->save();
+
+        // باطل کردن تمام توکن‌ها پس از تغییر رمز
+        $user->tokens()->delete();
+
+        // ریست کردن فرم
+        $this->reset(['currentPassword', 'newPassword', 'newPasswordConfirmation']);
+        $this->success("رمز با موفقیت تغییر یافت.", position: 'toast-bottom');
+    }
+}; ?>
+
+<div>
+    <!-- HEADER -->
+    <x-header title="تغییر رمز ورود به سیستم" separator progress-indicator>
+        <x-slot:actions>
+            <x-theme-selector/>
+        </x-slot:actions>
+    </x-header>
+
+    <div class="flex justify-center">
+        <x-card shadow class="w-full max-w-xl">
+            <x-form wire:submit="changePassword" class="grid gap-4">
+                <x-input
+                    label="رمز فعلی"
+                    type="password"
+                    wire:model="currentPassword"
+                    icon="o-key"
+                    required
+                />
+
+                <x-input
+                    label="رمز جدید"
+                    type="password"
+                    wire:model="newPassword"
+                    icon="o-key"
+                    required
+                />
+
+                <x-input
+                    label="تأیید رمز جدید"
+                    type="password"
+                    wire:model="newPasswordConfirmation"
+                    icon="o-key"
+                    required
+                />
+
+                {{-- #957: role="alert" تا خطای رمز واقعاً اعلام شود، نه فقط دیده. --}}
+                <x-errors role="alert" title="خطا" description="لطفا موارد خطا را اصلاح نمائید" icon="o-face-frown" dir="rtl"/>
+
+                <div class="flex gap-4">
+                    <x-button
+                        label="تغییر رمز"
+                        type="submit"
+                        icon="o-paper-airplane"
+                        class="btn-primary pl-6"
+                        spinner="changePassword"
+                    />
+                    <x-button
+                        label="ریست"
+                        icon="o-x-mark"
+                        wire:click="$refresh"
+                        class="btn-default pl-6"
+                    />
+                </div>
+            </x-form>
+        </x-card>
+    </div>
+</div>

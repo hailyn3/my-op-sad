@@ -1,0 +1,115 @@
+APP_NAME=h-dashboard
+APP_ENV=local
+APP_KEY=
+APP_DEBUG=false
+APP_URL=http://127.0.0.1:8000
+
+# ── Trusted proxies (#855) ──
+# Leave EMPTY for a direct nginx+FPM deployment — nothing is trusted, so a
+# client-supplied X-Forwarded-Host/Proto/Port/Prefix is ignored.
+# If a proxy (Cloudflare, a load balancer) IS in front of the app, pin its
+# CIDR ranges here, comma-separated, e.g.:
+#   TRUSTED_PROXIES=173.245.48.0/20,103.21.244.0/22
+# Then run `php artisan config:clear` (or `optimize`): a cached config freezes
+# this value at boot, so editing .env alone has no effect.
+TRUSTED_PROXIES=
+# Hostnames this app answers for, comma-separated. Used as the trustHosts()
+# allowlist that makes a wrong TRUSTED_PROXIES fail closed. Defaults to APP_URL
+# when left empty — set it explicitly in production if you serve other names.
+TRUSTED_HOSTS=
+# ── Map / routing / geocoding servers ──
+# تایل/نقشه (OpenStreetMap)
+TILE_SERVER_IP=tile.openstreetmap.org
+TILE_SERVER_PORT=
+TILE_SERVER_SCHEME=https
+# قالب کامل آدرس تایل (OSM)
+TILE_URL_TEMPLATE=https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
+# مسیریابی (OSRM)
+ROUTING_SERVER_IP=127.0.0.1
+ROUTING_SERVER_PORT=5000
+ROUTING_SERVER_SCHEME=http
+# آدرس‌یابی (Nominatim)
+GEOCODING_SERVER_IP=127.0.0.1
+GEOCODING_SERVER_PORT=8088
+GEOCODING_SERVER_SCHEME=http
+
+APP_LOCALE=fa
+APP_FALLBACK_LOCALE=en
+APP_FAKER_LOCALE=en_US
+
+APP_MAINTENANCE_DRIVER=file
+# APP_MAINTENANCE_STORE=database
+
+PHP_CLI_SERVER_WORKERS=4
+
+BCRYPT_ROUNDS=12
+
+LOG_CHANNEL=stack
+LOG_STACK=single
+LOG_DEPRECATIONS_CHANNEL=null
+LOG_LEVEL=debug
+
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=h_dashboard
+DB_USERNAME=h_dashboard
+DB_PASSWORD=<same-as-dev>
+DB_ROOT_PASSWORD=<same-as-dev>
+DB_DEFAULT_EMAIL=admin@...
+DB_DEFAULT_PASSWORD=<same-as-dev>
+
+# Application timezone (display layer). PostgreSQL keeps UTC for storage;
+# convert to Tehran/Jalali in code via morilog/jalali & hekmatinasser/verta.
+APP_TIMEZONE=Asia/Tehran
+
+SESSION_LIFETIME=120
+SESSION_ENCRYPT=false
+# Secure by default (#1003). Production/CI: leave unset (the app falls back to
+# true) or set true. `false` is only for plaintext local dev (`php artisan serve`)
+# and the e2e run on :8001 (see .env.e2e.example).
+SESSION_SECURE_COOKIE=true
+SESSION_PATH=/
+SESSION_DOMAIN=null
+
+BROADCAST_CONNECTION=log
+FILESYSTEM_DISK=local
+
+
+# CACHE_PREFIX=
+
+MEMCACHED_HOST=127.0.0.1
+
+#REDIS_CLIENT=phpredis
+
+
+# MAIL_MAILER=log
+# MAIL_SCHEME=null
+# MAIL_HOST=127.0.0.1
+# MAIL_PORT=2525
+# MAIL_USERNAME=null
+# MAIL_PASSWORD=null
+# MAIL_FROM_ADDRESS="hello@example.com"
+# MAIL_FROM_NAME="${APP_NAME}"
+
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_DEFAULT_REGION=us-east-1
+# AWS_BUCKET=
+# AWS_USE_PATH_STYLE_ENDPOINT=false
+
+VITE_APP_NAME="${APP_NAME}"
+VITE_HOST=localhost
+VITE_PORT=5173
+#OCTANE_SERVER=frankenphp
+
+CACHE_DRIVER=redis
+SESSION_DRIVER=redis
+QUEUE_CONNECTION=redis
+
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=<same-as-dev>
+
+ZABBIX_URL=http://127.0.0.1:8443/api_jsonrpc.php
+ZABBIX_TOKEN=

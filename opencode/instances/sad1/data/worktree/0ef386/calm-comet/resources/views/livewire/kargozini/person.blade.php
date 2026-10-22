@@ -1,0 +1,606 @@
+<?php
+use App\Models\Estekhdam;
+use App\Models\Hardware;
+use App\Models\Person as PersonModel;
+use App\Models\Radif;
+use App\Models\Semat;
+use App\Models\Tahsil;
+use App\Models\Unit;
+use App\Services\AccessService;
+use App\Traits\PersianNormalizer;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Livewire\Component;
+use Livewire\WithPagination;
+use Mary\Traits\Toast;
+
+/**
+ * Personnel management page (مدیریت پرسنل).
+ *
+ * Extracted from the anonymous class defined inline in
+ * resources/views/livewire/kargozini/person.blade.php so the component is
+ * testable in isolation and IDE-tooling friendly. Behavior is unchanged.
+ */
+return new class extends Component
+{
+    use Toast;
+    use WithPagination;
+
+    public bool $showHelpModal = false;
+
+    public $n_code;
+
+    public $f_name;
+
+    public $l_name;
+
+    public $t_id;
+
+    public $e_id;
+
+    public $s_id;
+
+    public $r_id;
+
+    public $u_id;
+
+    public ?string $phone = null;
+
+    public ?int $editingId = null;
+
+    public string $search = '';
+
+    public int $perPage = 20;
+
+    public bool $formOpen = false;
+
+    public bool $unitModal = false;
+
+    // List filter properties (#494) — kept separate from the create/edit form
+    // properties ($u_id, $s_id, ...) so opening the edit form does not filter the list.
+    public $filter_u_id;
+
+    public $filter_s_id;
+
+    public $filter_t_id;
+
+    public $filter_e_id;
+
+    public $filter_r_id;
+
+    public bool $filterUnitModal = false;
+
+    public bool $showFilters = false;
+
+    public array $sortBy = ['column' => 'id', 'direction' => 'asc'];
+
+    // #914: `sortBy` is client-settable, so only real columns are sortable.
+    // The `*_name` entries are the `withAggregate` aliases loaded above.
+    private const SORTABLE_COLUMNS = ['id', 'n_code', 'f_name', 'l_name', 'tahsil_name', 'estekhdam_name', 'semat_name', 'radif_name', 'unit_name'];
+
+    public function clearFilters(): void
+    {
+        $this->reset(['filter_u_id', 'filter_s_id', 'filter_t_id', 'filter_e_id', 'filter_r_id', 'filterUnitModal']);
+    }
+
+    /**
+     * The list filters carried into the Excel export as query params, so the
+     * download contains exactly the rows the table is showing.
+     *
+     * Livewire cannot return a file download, so the control is a plain
+     * `<a href>` — the parameters have to travel in the URL. The export
+     * re-applies them server-side and can only ever narrow the caller's
+     * accessible scope, never widen it.
+     *
+     * @return array<string, string|int>
+     */
+    public function exportQuery(): array
+    {
+        $params = array_filter([
+            'search' => trim($this->search),
+            'filter_u_id' => $this->filter_u_id,
+            'filter_s_id' => $this->filter_s_id,
+            'filter_t_id' => $this->filter_t_id,
+            'filter_e_id' => $this->filter_e_id,
+            'filter_r_id' => $this->filter_r_id,
+        ], fn ($value) => $value !== null && $value !== '' && $value !== false);
+
+        return $params;
+    }
+
+    public function resetForm(): void
+    {
+        $this->resetValidation();
+        $this->reset(['n_code', 'f_name', 'l_name', 't_id', 'e_id', 's_id', 'r_id', 'u_id', 'phone', 'editingId', 'formOpen', 'unitModal', 'showFilters', 'filter_u_id', 'filter_s_id', 'filter_t_id', 'filter_e_id', 'filter_r_id', 'filterUnitModal']);
+    }
+
+    public function startCreate(): void
+    {
+        // #805: opening the write form is part of writing personnel.
+        $this->authorize('manage_personnel');
+
+        $this->resetForm();
+        $this->formOpen = true;
+    }
+
+    /**
+     * Delete a person by PRIMARY KEY.
+     *
+     * #936: this used to be `delete(PersonModel $person)`, a typed parameter.
+     * Livewire resolves a typed model parameter through
+     * `resolveRouteBinding()`, i.e. by `getRouteKeyName()` — and `Person`
+     * overrides it to `n_code`. The Blade call site in this file's `@scope`
+     * block sends `$person->id`, so `resolveRouteBinding(3)` ran
+     * `WHERE n_code = '3'`, matched nothing, and threw `ModelNotFoundException`
+     * before this method body ever executed: the delete was 100%
+     * non-functional in the browser and the `#805` checks below were
+     * unreachable code.
+     *
+     * The parameter is therefore an `int` resolved against the primary key,
+     * matching the sibling `editPerson($id)` in this same file. Do NOT
+     * "fix" this by typing the parameter as `Person` and passing
+     * `$person->n_code` from Blade: `wire:click="delete({{ $person->n_code }})"`
+     * interpolates UNQUOTED, so the browser parses `0023548258` as a JS
+     * numeric literal and strips the leading zeros — a real convention in
+     * Iranian national codes. The id is the only value that survives the
+     * round trip untransformed.
+     */
+    public function delete(int $personId): void
+    {
+        // #805: the route gate is the READ union `kargozini|manage_personnel`,
+        // but a delete is a write — the API refuses it without
+        // `manage_personnel` (routes/api.php), so the UI must too.
+        // Authorized BEFORE the lookup so a bad id cannot be used as an
+        // existence probe.
+        $this->authorize('manage_personnel');
+
+        $person = PersonModel::findOrFail($personId);
+
+        // Check organizational scope
+        $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+        if (! in_array($person->u_id, $accessibleIds)) {
+            $this->error('شما مجاز به حذف این پرسنل نیستید.', position: 'toast-bottom');
+
+            return;
+        }
+
+        // #959: hardwares.n_code has no FK, so deleting the person would
+        // silently orphan every hardware row it owns (invisible to every
+        // unit, uneditable by anyone). Refuse while any hardware exists.
+        if (Hardware::where('n_code', $person->n_code)->exists()) {
+            $this->error('امکان حذف وجود ندارد زیرا برای این پرسنل سخت‌افزار ثبت شده است.', position: 'toast-bottom');
+
+            return;
+        }
+
+        try {
+            $person->delete();
+            $this->warning("$person->f_name $person->l_name حذف شد", 'با موفقیت', position: 'toast-bottom');
+        } catch (\Exception $e) {
+            $this->error('امکان حذف وجود ندارد زیرا در جدول دیگری استفاده شده است.', position: 'toast-bottom');
+        }
+    }
+
+    public function savePerson(): void
+    {
+        // #805: create/update are writes. The page's route gate is the READ
+        // union, so without this a `kargozini`-only user could create, edit
+        // and delete HR records — and the linked-user `user_units` sync
+        // below rewrites authorization reach, not just data.
+        $this->authorize('manage_personnel');
+
+        $this->validate([
+            'n_code' => 'required|string|size:10|unique:persons,n_code,'.($this->editingId ?: 'NULL'),
+            'f_name' => 'required|string|max:255',
+            'l_name' => 'required|string|max:255',
+            't_id' => 'required|exists:tahsils,id',
+            'e_id' => 'required|exists:estekhdams,id',
+            's_id' => 'required|exists:semats,id',
+            'r_id' => 'required|exists:radifs,id',
+            'u_id' => 'required|exists:units,id',
+            // #738: free-text phone, optional, simple max length — no format
+            // constraint (see the migration's docblock).
+            'phone' => 'nullable|string|max:20',
+        ]);
+
+        if ($this->editingId) {
+            $person = PersonModel::findOrFail($this->editingId);
+
+            // Check organizational scope for update
+            $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+            if (! in_array($person->u_id, $accessibleIds)) {
+                $this->error('شما مجاز به ویرایش این پرسنل نیستید.', position: 'toast-bottom');
+
+                return;
+            }
+
+            // #959: n_code is immutable on the update path — hardwares.n_code
+            // has no FK, so a rename silently orphans every hardware row of
+            // that person. The input is disabled, but a crafted Livewire call
+            // could still set it; refuse here.
+            if ((string) $this->n_code !== (string) $person->n_code) {
+                $this->addError('n_code', 'کد ملی قابل تغییر نیست.');
+
+                return;
+            }
+
+            // #805: the check above validates the STORED u_id, but the update
+            // writes the submitted one — so a unit the actor cannot reach was
+            // writable. Re-validate the submitted value before it is stored.
+            if (! in_array($this->u_id, $accessibleIds)) {
+                $this->error('شما مجاز به انتقال این پرسنل به این واحد نیستید.', position: 'toast-bottom');
+
+                return;
+            }
+
+            $person->update([
+                'n_code' => $this->n_code,
+                'f_name' => $this->f_name,
+                'l_name' => $this->l_name,
+                't_id' => $this->t_id,
+                'e_id' => $this->e_id,
+                's_id' => $this->s_id,
+                'r_id' => $this->r_id,
+                'u_id' => $this->u_id,
+                'phone' => $this->phone,
+            ]);
+
+            if ($user = $person->user) {
+                app(AccessService::class)->clearCache($user);
+                $user->units()->syncWithoutDetaching([$this->u_id => ['role' => 'staff', 'is_primary' => true]]);
+            }
+
+            $this->success('شخص به‌روزرسانی شد');
+        } else {
+            // Check organizational scope for create - u_id must be in accessible units
+            $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+            if (! in_array($this->u_id, $accessibleIds)) {
+                $this->error('شما مجاز به ثبت پرسنل در این واحد نیستید.', position: 'toast-bottom');
+
+                return;
+            }
+
+            $person = PersonModel::create([
+                'n_code' => $this->n_code,
+                'f_name' => $this->f_name,
+                'l_name' => $this->l_name,
+                't_id' => $this->t_id,
+                'e_id' => $this->e_id,
+                's_id' => $this->s_id,
+                'r_id' => $this->r_id,
+                'u_id' => $this->u_id,
+                'phone' => $this->phone,
+            ]);
+
+            if ($user = $person->user) {
+                app(AccessService::class)->clearCache($user);
+                $user->units()->syncWithoutDetaching([$this->u_id => ['role' => 'staff', 'is_primary' => true]]);
+            }
+
+            $this->success('شخص جدید ثبت شد');
+        }
+
+        $this->resetForm();
+    }
+
+    public function editPerson($id): void
+    {
+        $this->authorize('manage_personnel');
+
+        $this->resetValidation();
+        $person = PersonModel::findOrFail($id);
+
+        // Check organizational scope
+        $accessibleIds = app(AccessService::class)->accessibleUnitIds();
+        if (! in_array($person->u_id, $accessibleIds)) {
+            $this->error('شما مجاز به ویرایش این پرسنل نیستید.', position: 'toast-bottom');
+
+            return;
+        }
+
+        $this->editingId = (int) $id;
+        $this->n_code = $person->n_code;
+        $this->f_name = $person->f_name;
+        $this->l_name = $person->l_name;
+        $this->t_id = $person->t_id;
+        $this->e_id = $person->e_id;
+        $this->s_id = $person->s_id;
+        $this->r_id = $person->r_id;
+        $this->u_id = $person->u_id;
+        $this->phone = $person->phone;
+        $this->formOpen = true;
+        $this->unitModal = false;
+    }
+
+    public function headers(): array
+    {
+        return [
+            ['key' => 'id', 'label' => '#', 'class' => 'w-1 hidden 2xl:table-cell'],
+            ['key' => 'n_code', 'label' => 'کد ملی', 'class' => 'w-10 hidden sm:table-cell'],
+            ['key' => 'f_name', 'label' => 'نام', 'class' => 'w-10'],
+            ['key' => 'l_name', 'label' => 'نام خانوادگی', 'class' => 'w-10'],
+            ['key' => 'tahsil_name', 'label' => 'تحصیلات', 'class' => 'w-10 hidden xl:table-cell'],
+            ['key' => 'estekhdam_name', 'label' => 'استخدام', 'class' => 'w-10 hidden xl:table-cell'],
+            ['key' => 'semat_name', 'label' => 'سمت', 'class' => 'w-10 hidden xl:table-cell'],
+            ['key' => 'radif_name', 'label' => 'ردیف سازمانی', 'class' => 'w-10 hidden xl:table-cell'],
+            ['key' => 'unit_name', 'label' => 'واحد', 'class' => 'w-10 hidden xl:table-cell'],
+        ];
+    }
+
+    public function persons(): LengthAwarePaginator
+    {
+        $query = PersonModel::query()
+            ->accessible('u_id')
+            ->withAggregate('tahsil', 'name')
+            ->withAggregate('estekhdam', 'name')
+            ->withAggregate('semat', 'name')
+            ->withAggregate('radif', 'name')
+            ->withAggregate('unit', 'name');
+
+        if (! empty($this->search)) {
+            // Fold both the column and the term for Persian char equivalence.
+            // Each whitespace-separated term must match (AND); within a term,
+            // any of n_code / "first last" / "last first" / unit name counts.
+            $terms = array_values(array_filter(explode(' ', PersianNormalizer::normalizeForSearch($this->search)), fn ($t) => $t !== ''));
+
+            $query->where(function ($q) use ($terms) {
+                foreach ($terms as $term) {
+                    $foldedTerm = PersianNormalizer::foldedTerm($term);
+                    $q->where(function ($tq) use ($foldedTerm) {
+                        // n_code is numeric only - keep raw LIKE
+                        $tq->where('n_code', 'LIKE', "%{$foldedTerm}%")
+                            // Fold CONCAT columns for Persian equivalence
+                            ->orWhereRaw(PersianNormalizer::foldSeparatorsSql("CONCAT(f_name, ' ', l_name)").' LIKE ?', ["%{$foldedTerm}%"])
+                            ->orWhereRaw(PersianNormalizer::foldSeparatorsSql("CONCAT(l_name, ' ', f_name)").' LIKE ?', ["%{$foldedTerm}%"])
+                            // Fold unit name column
+                            ->orWhereHas('unit', function ($uq) use ($foldedTerm) {
+                                $uq->whereRaw(PersianNormalizer::foldSeparatorsSql('name').' LIKE ?', ["%{$foldedTerm}%"]);
+                            });
+                    });
+                }
+            });
+        }
+
+        // Unit, Semat, Tahsil, Estekhdam, Radif Filters (#494)
+        if ($this->filter_u_id) {
+            $query->where('u_id', $this->filter_u_id);
+        }
+        if ($this->filter_s_id) {
+            $query->where('s_id', $this->filter_s_id);
+        }
+        if ($this->filter_t_id) {
+            $query->where('t_id', $this->filter_t_id);
+        }
+        if ($this->filter_e_id) {
+            $query->where('e_id', $this->filter_e_id);
+        }
+        if ($this->filter_r_id) {
+            $query->where('r_id', $this->filter_r_id);
+        }
+
+        $column = in_array($this->sortBy['column'] ?? '', self::SORTABLE_COLUMNS, true)
+            ? $this->sortBy['column'] : 'id';
+        $direction = ($this->sortBy['direction'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
+        $query->orderBy($column, $direction);
+
+        return $query->paginate($this->perPage);
+    }
+
+    public function with(): array
+    {
+        $accessibleUnitIds = app(AccessService::class)->accessibleUnitIds();
+
+        $units = Unit::with('unitType')
+            ->whereIn('id', $accessibleUnitIds)
+            ->get()
+            ->map(fn ($u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'parent_id' => $u->parent_id,
+                'unit_type_name' => $u->unitType?->name,
+            ])
+            ->all();
+
+        // #919: `$units` is already scoped by the unconditional `whereIn`
+        // above, so `firstWhere()` only ever resolves an in-scope unit. The
+        // former `?? Unit::find(...)` fallback therefore ran exactly when the
+        // unit was OUT of scope. Out-of-scope now falls to `null`, like a
+        // nonexistent id. In-repo pattern: `select-context.blade.php:37-43`.
+        $selectedUnitName = $this->u_id
+            ? (collect($units)->firstWhere('id', (int) $this->u_id)['name'] ?? null)
+            : null;
+
+        $filterUnitName = $this->filter_u_id
+            ? (collect($units)->firstWhere('id', (int) $this->filter_u_id)['name'] ?? null)
+            : null;
+
+        return [
+            'persons' => $this->persons(),
+            'headers' => $this->headers(),
+            'tahsils' => Tahsil::all(),
+            'estekhdams' => Estekhdam::all(),
+            'semats' => Semat::all(),
+            'radifs' => Radif::all(),
+            'units' => $units,
+            'selectedUnitName' => $selectedUnitName,
+            'filterUnitName' => $filterUnitName,
+            'exportUrl' => route('kargozini.persons.export', $this->exportQuery()),
+        ];
+    }
+};
+?>
+
+<div>
+    <x-header title="مدیریت پرسنل" separator progress-indicator>
+        <x-slot:actions>
+            <x-help:button section="personnel" wireModel="showHelpModal" />
+            <x-theme-selector/>
+        </x-slot:actions>
+    </x-header>
+
+    <x-help:modal wireModel="showHelpModal" />
+
+    <x-card shadow>
+        <div class="flex gap-2 items-center mb-4">
+            {{-- #805: the page opens on the READ union `kargozini|manage_personnel`,
+                 so the create button is wrapped in the write permission — a
+                 read-only user must not be shown a control that only 403s. --}}
+            @can('manage_personnel')
+                <x-ui.icon-button name="کارمند جدید" class="btn-success" wire:click="startCreate" icon="o-plus"/>
+            @endcan
+            <a href="{{ $exportUrl }}"
+               class="btn btn-outline btn-sm"
+               title="خروجی اکسل پرسنل در دسترس با فیلترهای فعال">
+                <x-icon name="o-arrow-down-tray" class="w-5 h-5"/>
+                <span class="hidden 2xl:inline">خروجی اکسل</span>
+            </a>
+            <div class="flex-1">
+                <x-input
+                    placeholder="جستجو..."
+                    wire:model.live.debounce="search"
+                    clearable
+                    icon="o-magnifying-glass"
+                    class="w-full"
+                />
+            </div>
+            <x-ui.icon-button name="نمایش فیلترها" icon="o-funnel" class="btn-outline btn-sm" wire:click="$toggle('showFilters')"
+                      :class="$showFilters ? 'btn-primary' : ''" />
+        </div>
+
+        @if($showFilters)
+            <div class="mb-4 p-4 bg-base-200 rounded-lg grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <x-select wire:model.live="filter_s_id" label="سمت" :options="$semats" placeholder="همه سمت‌ها" />
+                <x-select wire:model.live="filter_t_id" label="تحصیلات" :options="$tahsils" placeholder="همه سطوح تحصیلات" />
+                <x-select wire:model.live="filter_e_id" label="استخدام" :options="$estekhdams" placeholder="همه انواع استخدام" />
+                <x-select wire:model.live="filter_r_id" label="ردیف سازمانی" :options="$radifs" placeholder="همه ردیف‌ها" />
+                <div>
+                    <label class="text-sm font-medium block mb-1">واحد</label>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex-1 min-w-[12rem] input input-bordered flex items-center">
+                            <span class="{{ $filterUnitName ? '' : 'text-base-content/40' }} text-sm">
+                                {{ $filterUnitName ?: 'همه واحدها' }}
+                            </span>
+                        </div>
+                        <x-button type="button" label="انتخاب واحد" icon="o-building-office-2"
+                                  class="btn-outline btn-sm" wire:click="$set('filterUnitModal', true)" />
+                    </div>
+                </div>
+                <div class="flex items-end">
+                    <x-button icon="o-x-mark" class="btn-ghost btn-sm" wire:click="clearFilters" label="پاک کردن فیلترها" />
+                </div>
+            </div>
+        @endif
+
+        <x-modal wire:model="filterUnitModal" title="انتخاب واحد (فیلتر)" persistent separator>
+            {{-- #1171: render-on-open. See the note on the `unitModal` picker
+                 below — the tree is built only while its modal is open. --}}
+            @if ($filterUnitModal)
+                @include('livewire.partials.unit-tree-picker', [
+                    'model' => 'filter_u_id',
+                    'multiple' => false,
+                    'alwaysOpen' => true,
+                    'label' => 'واحد سازمانی',
+                ])
+            @endif
+            <x-slot:actions>
+                <x-button label="تأیید" icon="o-check" class="btn-primary" wire:click="$set('filterUnitModal', false)" />
+                <x-button label="بستن" icon="o-x-mark" class="btn-ghost" wire:click="$set('filterUnitModal', false)" />
+            </x-slot:actions>
+        </x-modal>
+
+        @if($formOpen)
+            <div class="mb-6 p-4 bg-base-200 rounded-xl border border-base-300">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="font-bold text-sm">
+                        {{ $editingId ? 'ویرایش پرسنل' : 'ثبت پرسنل جدید' }}
+                    </h3>
+                    <x-ui.icon-button name="پاک کردن فرم" icon="o-x-mark" class="btn-ghost btn-sm" wire:click="resetForm" />
+                </div>
+
+                <x-form wire:submit.prevent="savePerson" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <x-input wire:model="n_code" label="کد ملی" placeholder="کد ملی" required :disabled="(bool) $editingId"/>
+                    <x-input wire:model="f_name" label="نام" placeholder="نام" required/>
+                    <x-input wire:model="l_name" label="نام خانوادگی" placeholder="نام خانوادگی" required/>
+                    <x-select wire:model="t_id" label="تحصیلات" :options="$tahsils" required placeholder="انتخاب سطح تحصیلات"/>
+                    <x-select wire:model="e_id" label="استخدام" :options="$estekhdams" required placeholder="انتخاب نوع استخدام"/>
+                    <x-select wire:model="s_id" label="سمت" :options="$semats" required placeholder="انتخاب سمت"/>
+                    <x-select wire:model="r_id" label="ردیف سازمانی" :options="$radifs" required placeholder="انتخاب ردیف سازمانی"/>
+                    <x-input wire:model="phone" label="شماره تماس" placeholder="شماره تماس" maxlength="20"/>
+
+                    <div class="sm:col-span-2">
+                        <label class="text-sm font-medium block mb-1">واحد</label>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <div class="flex-1 min-w-[12rem] input input-bordered flex items-center">
+                                <span class="{{ $selectedUnitName ? '' : 'text-base-content/40' }} text-sm">
+                                    {{ $selectedUnitName ?: 'واحدی انتخاب نشده' }}
+                                </span>
+                            </div>
+                            <x-button
+                                type="button"
+                                label="انتخاب واحد"
+                                icon="o-building-office-2"
+                                class="btn-outline btn-sm"
+                                wire:click="$set('unitModal', true)"
+                            />
+                        </div>
+                        @error('u_id') <span class="text-error text-xs">{{ $message }}</span> @enderror
+                    </div>
+
+                    <div class="sm:col-span-2 flex justify-end gap-2">
+                        <x-button type="submit" label="{{ $editingId ? 'به‌روزرسانی' : 'ذخیره' }}" icon="o-check" class="btn-primary" spinner />
+                        <x-button type="button" label="لغو" wire:click="resetForm" icon="o-x-mark" class="btn-ghost" />
+                    </div>
+                </x-form>
+            </div>
+        @endif
+
+        <x-table :headers="$headers" :rows="$persons" :sort-by="$sortBy" with-pagination per-page="perPage"
+                 :per-page-values="[10, 20, 50]">
+            @scope('actions', $person)
+                {{-- #805: edit/delete are writes; hide them from a `kargozini`-only
+                     reader instead of rendering buttons that 403 on click. --}}
+                @can('manage_personnel')
+                    <div class="flex w-1/12">
+{{-- #936: sends the PRIMARY KEY. `delete()` takes an `int` and
+                             resolves it with `findOrFail`, because `Person`'s
+                             `getRouteKeyName()` is `n_code` and a typed model
+                             parameter would bind by that instead. Keep this as
+                             `->id` — never interpolate `->n_code` unquoted, the
+                             browser strips its leading zeros. --}}
+                        <x-ui.icon-button name="ویرایش کارمند" icon="o-pencil"
+                                  wire:click="editPerson({{ $person->id }})"
+                                  class="btn-ghost btn-sm text-primary" />
+                        <x-ui.icon-button name="حذف کارمند" icon="o-trash"
+                                  wire:click="delete({{ $person->id }})"
+                                  wire:confirm="آیا مطمئن هستید"
+                                  spinner
+                                  class="btn-ghost btn-sm text-error" />
+                    </div>
+                @endcan
+            @endscope
+        </x-table>
+    </x-card>
+
+    <x-modal wire:model="unitModal" title="انتخاب واحد" persistent separator>
+        {{-- #1171: render-on-open. This picker renders the whole org tree in
+             PHP (≈494 KB of HTML on the dev database) and serialises every unit
+             into inline JSON, so rendering it while the modal is closed wastes
+             that cost on every keystroke and every page change. Opening the
+             modal is already a round trip (`$set('unitModal', true)`), so the
+             tree is built exactly when it becomes visible — no extra request.
+             The scope contract (#849/#1040) is untouched: `@if` changes WHEN the
+             tree renders, not WHICH units it contains. --}}
+        @if ($unitModal)
+            @include('livewire.partials.unit-tree-picker', [
+                'units' => $units,
+                'model' => 'u_id',
+                'multiple' => false,
+                'alwaysOpen' => true,
+                'label' => 'واحد سازمانی',
+            ])
+        @endif
+        <x-slot:actions>
+            <x-button label="تأیید" icon="o-check" class="btn-primary" wire:click="$set('unitModal', false)" />
+            <x-button label="بستن" icon="o-x-mark" class="btn-ghost" wire:click="$set('unitModal', false)" />
+        </x-slot:actions>
+    </x-modal>
+</div>

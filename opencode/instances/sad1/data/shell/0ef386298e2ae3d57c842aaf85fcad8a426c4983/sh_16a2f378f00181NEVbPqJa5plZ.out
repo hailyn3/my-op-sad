@@ -1,0 +1,76 @@
+
+> build
+> vite build
+
+[36mvite v8.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+/*! 🌼 daisyUI 5.7.50 */
+
+/fonts/Vazirmatn-Regular.woff2 referenced in /fonts/Vazirmatn-Regular.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/fonts/Vazirmatn-Bold.woff2 referenced in /fonts/Vazirmatn-Bold.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+✓ 5 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json              0.33 kB │ gzip:  0.16 kB
+public/build/assets/app-BhyfPv6j.css  354.46 kB │ gzip: 44.92 kB
+public/build/assets/app-En4f3KAm.js     1.17 kB │ gzip:  0.67 kB
+
+[32m✓ built in 701ms[39m
+
+> build
+> vite build
+
+[36mvite v8.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+/*! 🌼 daisyUI 5.7.50 */
+
+/fonts/Vazirmatn-Regular.woff2 referenced in /fonts/Vazirmatn-Regular.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/fonts/Vazirmatn-Bold.woff2 referenced in /fonts/Vazirmatn-Bold.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+✓ 5 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json              0.33 kB │ gzip:  0.16 kB
+public/build/assets/app-BBQ8VhkG.css  398.94 kB │ gzip: 51.28 kB
+public/build/assets/app-En4f3KAm.js     1.17 kB │ gzip:  0.67 kB
+
+[32m✓ built in 676ms[39m
+
+> build
+> vite build
+
+[36mvite v8.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+/*! 🌼 daisyUI 5.7.50 */
+
+/fonts/Vazirmatn-Regular.woff2 referenced in /fonts/Vazirmatn-Regular.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/fonts/Vazirmatn-Bold.woff2 referenced in /fonts/Vazirmatn-Bold.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+✓ 5 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json              0.33 kB │ gzip:  0.16 kB
+public/build/assets/app-CqhBSMtY.css  386.62 kB │ gzip: 50.32 kB
+public/build/assets/app-En4f3KAm.js     1.17 kB │ gzip:  0.67 kB
+
+[32m✓ built in 736ms[39m
+
+> build
+> vite build
+
+[36mvite v8.3.5 [32mbuilding client environment for production...[36m[39m
+transforming...
+/*! 🌼 daisyUI 5.7.50 */
+
+/fonts/Vazirmatn-Regular.woff2 referenced in /fonts/Vazirmatn-Regular.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+
+/fonts/Vazirmatn-Bold.woff2 referenced in /fonts/Vazirmatn-Bold.woff2 didn't resolve at build time, it will remain unchanged to be resolved at runtime
+✓ 5 modules transformed.
+rendering chunks...
+computing gzip size...
+public/build/manifest.json              0.33 kB │ gzip:  0.16 kB
+public/build/assets/app-6aS7hYI_.css  398.19 kB │ gzip: 51.22 kB
+public/build/assets/app-En4f3KAm.js     1.17 kB │ gzip:  0.67 kB
+
+[32m✓ built in 682ms[39m

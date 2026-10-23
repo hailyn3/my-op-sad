@@ -1,0 +1,5 @@
+[feat/1227-all-daisyui-themes 6c48de5f] feat: enable all 35 daisyUI themes with full sweep infrastructure (#1227)
+ 14 files changed, 1071 insertions(+), 373 deletions(-)
+ create mode 100644 .github/workflows/theme-sweep-35.yml
+ create mode 100644 tests/e2e/theme/sweep-35.spec.ts
+ create mode 100644 tests/e2e/theme/sweep-runner.ts

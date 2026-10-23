@@ -1,0 +1,17 @@
+346268d6 fix(#1221): give every maps.map host a stable wire:key
+ .../views/livewire/map/map-dashboard.blade.php     |   2 +-
+ resources/views/livewire/maps/county.blade.php     |   2 +-
+ resources/views/livewire/maps/map.blade.php        |  12 +-
+ resources/views/livewire/maps/point.blade.php      |   2 +-
+ resources/views/livewire/maps/route.blade.php      |   2 +-
+ resources/views/livewire/maps/route2.blade.php     |   2 +-
+ resources/views/livewire/maps/unit.blade.php       |   2 +-
+ .../livewire/reports/map-no-boundary.blade.php     |   2 +-
+ tests/Feature/MapHostWireKeyTest.php               | 127 +++++++++
+ tests/e2e/maps/unit-filters.spec.ts                | 292 +++++++++++++++++++++
+ 10 files changed, 437 insertions(+), 8 deletions(-)
+remote:      https://github.com/hailyn3/h-dashboard/pull/new/fix/1221-map-host-wire-key        
+remote: 
+To https://github.com/hailyn3/h-dashboard.git
+ * [new branch]        HEAD -> fix/1221-map-host-wire-key
+branch 'fix/1221-map-host-wire-key' set up to track 'origin/fix/1221-map-host-wire-key'.

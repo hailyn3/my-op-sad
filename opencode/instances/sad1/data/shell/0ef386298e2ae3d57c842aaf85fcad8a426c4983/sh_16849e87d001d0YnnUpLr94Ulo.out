@@ -1,0 +1,3 @@
+packages nette/schema 8.1 - 8.5
+packages nette/utils 8.2 - 8.5
+packages-dev brianium/paratest ~8.3.0 || ~8.4.0 || ~8.5.0

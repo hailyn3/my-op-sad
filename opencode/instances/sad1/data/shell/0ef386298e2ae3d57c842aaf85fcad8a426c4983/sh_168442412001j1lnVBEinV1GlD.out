@@ -1,0 +1,5 @@
+exit=1
+  [41;1m FAILED [49;22m [1mTests\Unit\PhpConstraintTest[22m [90m>[39m exactly three locked packages bloc…   
+[39;1m  Failed asserting that two arrays are identical.
+  [90mTests:[39m    [31;1m1 failed[39;22m[90m,[39m[39m [39m[33;1m2 risky[39;22m[90m,[39m[39m [39m[32;1m2684 passed[39;22m[90m (8798 assertions)[39m
+  [90mDuration:[39m [39m344.83s[39m

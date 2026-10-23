@@ -1,0 +1,44 @@
+database/seeders/CenterBoundarySeeder.php:139:        $this->command?->info('Created '.count($boundaries).' boundaries for center units.');
+database/seeders/HardwareHistorySeeder.php:57:        $this->command?->info('Seeding hardware audit history for '.count($records).' devices...');
+database/seeders/HardwareHistorySeeder.php:108:        $this->command?->info("Hardware history seeded: {$inserted} new audit entries".($skipped ? ", {$skipped} devices skipped (not found)." : '.'));
+2134-			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Console\\Command\. Use \-\> instead\.$#'
+2135-			identifier: nullsafe.neverNull
+2136-			count: 1
+2137:			path: database/seeders/CenterBoundarySeeder.php
+2138-
+2139-		-
+2140-			message: '#^Call to an undefined static method App\\Models\\Estekhdam\:\:create\(\)\.$#'
+2141-			identifier: staticMethod.notFound
+2142-			count: 1
+2143-			path: database/seeders/EstekhdamSeeder.php
+--
+2146-			message: '#^Call to an undefined static method App\\Models\\HardwareAudit\:\:create\(\)\.$#'
+2147-			identifier: staticMethod.notFound
+2148-			count: 1
+2149:			path: database/seeders/HardwareHistorySeeder.php
+2150-
+2151-		-
+2152:			message: '#^Method Database\\Seeders\\HardwareHistorySeeder\:\:actorNcodes\(\) has parameter \$records with no value type specified in iterable type array\.$#'
+2153-			identifier: missingType.iterableValue
+2154-			count: 1
+2155:			path: database/seeders/HardwareHistorySeeder.php
+2156-
+2157-		-
+2158:			message: '#^Method Database\\Seeders\\HardwareHistorySeeder\:\:actorNcodes\(\) return type has no value type specified in iterable type array\.$#'
+2159-			identifier: missingType.iterableValue
+2160-			count: 1
+2161:			path: database/seeders/HardwareHistorySeeder.php
+2162-
+2163-		-
+2164-			message: '#^Using nullsafe method call on non\-nullable type Illuminate\\Console\\Command\. Use \-\> instead\.$#'
+2165-			identifier: nullsafe.neverNull
+2166-			count: 2
+2167:			path: database/seeders/HardwareHistorySeeder.php
+2168-
+2169-		-
+2170-			message: '#^Call to an undefined static method App\\Models\\Hardware\:\:create\(\)\.$#'
+2171-			identifier: staticMethod.notFound
+2172-			count: 1
+2173-			path: database/seeders/HardwareSeeder.php
+PHP 8.5.12 (cli) (built: Oct 21 2026 08:06:50) (NTS)
+Copyright (c) The PHP Group

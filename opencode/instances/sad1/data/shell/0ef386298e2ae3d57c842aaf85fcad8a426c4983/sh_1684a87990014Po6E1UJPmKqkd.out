@@ -1,0 +1,3 @@
+346268d6 fix(#1221): give every maps.map host a stable wire:key
+ M composer.lock
+ M package-lock.json

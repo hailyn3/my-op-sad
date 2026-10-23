@@ -1,0 +1,21 @@
+exit=1
+         type Illuminate\\Console\\Command\. Use \-> instead\.$#              
+         (nullsafe.neverNull) in path                                         
+         /home/runner/h-dashboard/database/seeders/CenterBoundarySeeder.php   
+         was not matched in reported errors.                                  
+         🪪  ignore.unmatched (non-ignorable)                                 
+ ------ --------------------------------------------------------------------- 
+
+ ------ --------------------------------------------------------------------- 
+  Line   database/seeders/HardwareHistorySeeder.php                           
+ ------ --------------------------------------------------------------------- 
+         Ignored error pattern #^Using nullsafe method call on non\-nullable  
+         type Illuminate\\Console\\Command\. Use \-> instead\.$#              
+         (nullsafe.neverNull) in path                                         
+         /home/runner/h-dashboard/database/seeders/HardwareHistorySeeder.php  
+         was not matched in reported errors.                                  
+         🪪  ignore.unmatched (non-ignorable)                                 
+ ------ --------------------------------------------------------------------- 
+
+ [ERROR] Found 2 errors                                                         
+

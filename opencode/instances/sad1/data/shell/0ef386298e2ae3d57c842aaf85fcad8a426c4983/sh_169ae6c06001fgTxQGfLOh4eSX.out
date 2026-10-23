@@ -1,0 +1,12 @@
+exit:2
+
+── Environment preflight
+Testing database: pgsql://h_dashboard@127.0.0.1:5432/h_dashboard_test
+Database [h_dashboard_test] does not exist.
+Create it once with:
+  psql -h '127.0.0.1' -U 'h_dashboard' -d postgres -c 'CREATE DATABASE h_dashboard_test WITH OWNER=h_dashboard;'
+Resolved target: pgsql://h_dashboard@127.0.0.1:5432/h_dashboard_test
+
+✗ Preflight failed (exit 2). Nothing was run, nothing was touched.
+  Fix the environment above, then run composer verify again.
+Script bash scripts/verify.sh handling the verify event returned with error code 2

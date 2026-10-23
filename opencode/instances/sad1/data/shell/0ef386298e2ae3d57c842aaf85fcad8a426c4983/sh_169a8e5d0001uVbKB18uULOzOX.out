@@ -1,0 +1,26 @@
+    public int $historyCurrentPage = 1;
+
+    public int $historyPerPage = 15;
+
+    public int $historyTotal = 0;
+
+    public ?string $historyActionFilter = null;
+
+    // ── History methods ──────────────────────────────────────────────
+
+    public function loadHistory(int $hardwareId): void
+    {
+        $this->historyHardwareId = $hardwareId;
+        $this->historyCurrentPage = 1;
+        $this->historyActionFilter = null;
+        $this->fetchHistory();
+        $this->showHistoryModal = true;
+    }
+
+    /**
+     * Fetch history from DB (scoped to accessible units).
+     */
+    private function fetchHistory(): void
+    {
+        if (! $this->historyHardwareId) {
+            return;

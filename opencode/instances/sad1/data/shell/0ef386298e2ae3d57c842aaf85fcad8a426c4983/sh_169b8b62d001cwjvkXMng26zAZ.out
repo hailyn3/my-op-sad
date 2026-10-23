@@ -1,0 +1,23 @@
+hailyn3
+hailyn3@users.noreply.github.com
+[fix/1226-badge-solid-contrast ef952011] fix(#1226): per-theme opaque/glass matrix for solid badge contrast
+ 2 files changed, 72 insertions(+), 11 deletions(-)
+commit ef95201153e8d52ad7e64712846ffd517f8f6640
+Author: hailyn3 <hailyn3@users.noreply.github.com>
+Date:   Fri Oct 23 17:04:35 2026 +0000
+
+    fix(#1226): per-theme opaque/glass matrix for solid badge contrast
+    
+    The glass badge rule re-tints --badge-color 70% toward the page while keeping daisyUI's --badge-fg, so the pair breaks: light 3.42, synthwave 2.98 and fantasy 3.64, plus per-variant failures the primary-only sweep row never saw. Restoring the opaque token pair for every theme would drop dark primary from 6.04 to 4.14, so the fix is a per-theme variant matrix.
+    
+    light: primary + secondary opaque (secondary fg = base-content, 4.83)
+    dark: info/success/warning/error opaque, primary stays glass (6.04)
+    synthwave: primary/secondary/info/success/warning/error opaque
+    fantasy: primary/secondary/neutral opaque (secondary fg = white, 4.86)
+    luxury: error opaque; coffee/cupcake untouched
+    
+    Outline/dash/soft/ghost are excluded and keep the 6px backdrop blur. The sweep drops its three badge-solid structural entries and injects one badge per solid variant, asserting all 56 theme x variant cells >= 4.5.
+
+ resources/css/app.css         | 32 +++++++++++++++++++++++++++
+ tests/e2e/theme/sweep.spec.ts | 51 +++++++++++++++++++++++++++++++++----------
+ 2 files changed, 72 insertions(+), 11 deletions(-)

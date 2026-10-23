@@ -1,0 +1,16 @@
+exit:0
+  [32;1m✓[39;22m[90m [39m[90mdifferent namespaces are isolated[39m[90m                                   [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mincrement outside batch bumps immediately[39m[90m                           [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mbatch deduplicates same namespace[39m[90m                                   [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mbatch flushes pending increments[39m[90m                                    [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mnested batch not supported flushes at outer[39m[90m                         [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mincrement bumps version[39m[90m                                             [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mflush pending returns count[39m[90m                                         [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mremember uses extra in key[39m[90m                                          [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mremember returns closures result[39m[90m                                    [39m [90m0.01s[39m  
+  [32;1m✓[39;22m[90m [39m[90mcache key format[39m[90m                                                    [39m [90m0.01s[39m  
+
+  [90mTests:[39m    [33;1m2 risky[39;22m[90m,[39m[39m [39m[32;1m2693 passed[39;22m[90m (8850 assertions)[39m
+  [90mDuration:[39m [39m566.19s[39m
+  [90mRandom Order Seed:[39m [39m1792774477[39m
+

@@ -1,0 +1,8 @@
+theme      identical before -> after
+light      True      color=oklch(0.21 0.006 285.885) bg=oklab(0.98 0 0 / 0.7) border=oklch(0.21 0.006 285.885) blur=blur(6px) ratio=16.55
+dark       True      color=oklch(0.97807 0.029 256.847) bg=oklab(0.2326 -0.00406983 -0.0133954 / 0.7) border=oklch(0.97807 0.029 256.847) blur=blur(6px) ratio=15.59
+synthwave  True      color=oklch(0.78 0.115 274.713) bg=oklab(0.2 0.0176166 -0.088259 / 0.7) border=oklch(0.78 0.115 274.713) blur=blur(6px) ratio=9.11
+coffee     True      color=oklch(0.72354 0.092 79.129) bg=oklab(0.21 0.0181328 -0.0105925 / 0.7) border=oklch(0.72354 0.092 79.129) blur=blur(6px) ratio=7.2
+cupcake    True      color=oklch(0.23574 0.066 313.189) bg=oklab(0.93982 0.00334559 0.00614874 / 0.7) border=oklch(0.23574 0.066 313.189) blur=blur(6px) ratio=14.21
+fantasy    True      color=oklch(0.27807 0.029 256.847) bg=oklab(0.93 0 0 / 0.7) border=oklch(0.27807 0.029 256.847) blur=blur(6px) ratio=12.09
+luxury     True      color=oklch(0.75687 0.123 76.89) bg=oklab(0.20219 0.00247522 -0.00314218 / 0.7) border=oklch(0.75687 0.123 76.89) blur=blur(6px) ratio=8.33

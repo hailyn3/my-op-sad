@@ -1,0 +1,61 @@
+     * Single source of truth: `normalize()` applies it in PHP and
+     * `foldSeparatorsSql()` builds the matching `regexp_replace` chain from it.
+     * Adding a character here automatically covers both sides — that is the
+     * only way the two cannot drift apart and silently break search (#705).
+     *
+     * ZWNJ/ZWJ map to a SPACE, not to nothing. Deleting them makes the SQL regex
+     * consume the following letter as a modifier and eat it.
+     */
+    public static function normalize(string $text): string
+    {
+        return strtr($text, self::charMap());
+    }
+
+    /**
+     * The Arabic/Persian variant map. A method rather than a constant because a
+     * trait constant cannot be read from outside the trait, and the tests call
+     * these helpers on the trait directly.
+     *
+     * @return array<string, string>
+     */
+    public static function charMap(): array
+    {
+        return [
+            "\u{064A}" => "\u{06CC}",  // Arabic Yeh -> Persian Yeh
+            "\u{0643}" => "\u{06A9}",  // Arabic Kaf -> Persian Kaf
+            "\u{0623}" => "\u{0627}",  // Arabic Alef with Hamza above -> Persian Alef
+            "\u{0625}" => "\u{0627}",  // Arabic Alef with Hamza below -> Persian Alef
+            "\u{0622}" => "\u{0627}",  // Arabic Alef with Madda above -> Persian Alef
+            "\u{200C}" => ' ',          // ZWNJ -> space
+            "\u{200D}" => ' ',          // ZWJ -> space
+        ];
+    }
+
+    public static function normalizeForSearch(string $text): string
+    {
+        $text = self::normalize($text);
+
+        // Convert Persian (۰-۹) and Arabic-Indic (٠-٩) digits to Latin so a
+        // national code typed on a Persian keyboard matches the Latin digits
+        // stored in the database.
+        $text = strtr($text, self::digitMap());
+
+        // Remove extra spaces
+        $text = preg_replace('/\s+/', ' ', trim($text));
+
+        return $text;
+    }
+
+    /**
+     * Persian (۰-۹) and Arabic-Indic (٠-٩) digits mapped to Latin.
+     *
+     * Second half of the single source of truth: `normalizeForSearch()` applies
+     * it in PHP, `foldSeparatorsSql()` emits the matching `translate()` call, so
+     * the term side and the column side fold digits identically.
+     *
+     * @return array<string, string>
+     */
+    public static function digitMap(): array
+    {
+        return [
+            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',

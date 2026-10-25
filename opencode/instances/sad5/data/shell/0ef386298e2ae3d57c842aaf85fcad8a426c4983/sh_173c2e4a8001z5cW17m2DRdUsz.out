@@ -1,0 +1,41 @@
+
+            if ($name !== false) {
+                return $name;
+            }
+
+            $hashOfClass = $this->generateHashName($class);
+
+            $name = $this->classComponents[$hashOfClass] ?? false;
+
+            if ($name !== false) {
+                return $name;
+            }
+
+            $result = $this->generateNameFromClass($class);
+
+            return $result;
+        }
+
+        // Rewrite slash-style nested paths to canonical dot-notation and
+        // strip ⚡ markers so the same component is referenced by a
+        // single canonical name regardless of how it was written.
+        $nameComponentOrClass = preg_replace('/' . self::ZAP . '[\x{FE0E}\x{FE0F}]?/u', '', $nameComponentOrClass);
+        $nameComponentOrClass = str_replace('/', '.', $nameComponentOrClass);
+
+        return $nameComponentOrClass;
+    }
+
+    public function parseNamespaceAndName($name): array
+    {
+        if (str_contains($name, '::')) {
+            [$namespace, $componentName] = explode('::', $name, 2);
+            return [$namespace, $componentName];
+        }
+
+        return [null, $name];
+    }
+
+    public function resolveClassComponentClassName($name): ?string
+    {
+        [$namespace, $componentName] = $this->parseNamespaceAndName($name);
+

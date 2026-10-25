@@ -1,0 +1,1 @@
+218:- `mount()`: `emptyScope = app(AccessService::class)->accessibleUnitIds() === []` و بنر «دامنهٔ شما خالی است» (الگوی `reports/todos.blade.php:29-37`). فیلتر تاریخ پیش‌فرض **خالی = همه** (پیش‌فرض «سال جاری» تصمیم ۲۰ مخصوص نقشه است، نه این لیست).

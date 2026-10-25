@@ -1,0 +1,64 @@
+<?php
+
+return [
+
+    /*
+    |---------------------------------------------------------------------------
+    | Component Locations
+    |---------------------------------------------------------------------------
+    |
+    | This value sets the root directories that'll be used to resolve view-based
+    | components like single and multi-file components. The make command will
+    | use the first directory in this array to add new component files to.
+    |
+    */
+
+    'component_locations' => [
+        resource_path('views/components'),
+        resource_path('views/livewire'),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Component Namespaces
+    |---------------------------------------------------------------------------
+    |
+    | This value sets default namespaces that will be used to resolve view-based
+    | components like single-file and multi-file components. These folders'll
+    | also be referenced when creating new components via the make command.
+    |
+    */
+
+    'component_namespaces' => [
+        'pages' => resource_path('views/pages'),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Page Layout
+    |---------------------------------------------------------------------------
+    | The view that will be used as the layout when rendering a single component as
+    | an entire page via `Route::livewire('/post/create', 'pages::create-post')`.
+    | In this case, the content of pages::create-post will render into $slot.
+    |
+    */
+
+    'component_layout' => 'components.layouts.app',
+
+    /*
+    |---------------------------------------------------------------------------
+    | Lazy Loading Placeholder
+    |---------------------------------------------------------------------------
+    | Livewire allows you to lazy load components that would otherwise slow down
+    | the initial page load. Every component can have a custom placeholder or
+    | you can define the default placeholder view for all components below.
+    |
+    */
+
+    'component_placeholder' => null, // Example: 'placeholders::skeleton'
+
+    /*
+=== grep component_locations usage
+vendor/livewire/livewire/src/LivewireServiceProvider.php:102:            'livewire.component_locations',
+vendor/livewire/livewire/src/LivewireServiceProvider.php:103:            config('livewire.component_locations', [
+vendor/livewire/livewire/src/LivewireServiceProvider.php:129:        foreach (config('livewire.component_locations', []) as $location) {

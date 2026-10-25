@@ -1,0 +1,1 @@
+88:- unit در ستون نیست (بند ۳ بخش ۰) → `new_values` در create/update و `old_values` در delete شامل `unit_id` و `subject_unit_id` باشد. برای delete، لاگ **قبل** از حذف نوشته شود.

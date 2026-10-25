@@ -1,0 +1,36 @@
+             modal is already a round trip (`$set('unitModal', true)`), so the
+             tree is built exactly when it becomes visible — no extra request.
+             The scope contract (#849/#1040) is untouched: `@if` changes WHEN the
+             tree renders, not WHICH units it contains. --}}
+        @if ($unitModal)
+            @include('livewire.partials.unit-tree-picker', [
+                'units' => $this->allUnitsTree(),
+                'model' => 'unit_ids',
+                'multiple' => true,
+=== todos 20-28
+
+    public string $dateTo = '';
+
+    public ?int $selectedUnitId = null;
+
+    public ?string $statusFilter = null; // completed, pending, overdue, null=all
+
+    public bool $showHelpModal = false;
+
+=== advanced 385-400
+        <div class="grid grid-cols-2 gap-3 mt-3">
+            <div class="flex flex-col gap-1" wire:ignore>
+                <label class="font-bold text-xs">از تاریخ</label>
+                <input data-jdp id="advanced_report_date_from" placeholder="از تاریخ"
+                    value="{{ $dateFrom }}"
+                    class="input input-bordered input-sm w-full text-center cursor-pointer" readonly>
+            </div>
+            <div class="flex flex-col gap-1" wire:ignore>
+                <label class="font-bold text-xs">تا تاریخ</label>
+                <input data-jdp id="advanced_report_date_to" placeholder="تا تاریخ"
+                    value="{{ $dateTo }}"
+                    class="input input-bordered input-sm w-full text-center cursor-pointer" readonly>
+            </div>
+        </div>
+    </x-card>
+

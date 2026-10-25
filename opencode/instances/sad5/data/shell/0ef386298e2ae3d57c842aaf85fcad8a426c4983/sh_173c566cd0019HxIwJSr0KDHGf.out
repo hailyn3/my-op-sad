@@ -1,0 +1,10 @@
+130:     * #1040: the tree rows the unit-tree-picker modal reads — keys
+804:        @if ($unitModal)
+805:            @include('livewire.partials.unit-tree-picker', [
+138:    public function allUnitsTree(): array
+527:                $foldedConcat = \App\Traits\PersianNormalizer::foldSeparatorsSql("CONCAT(f_name, ' ', l_name)");
+567:        $foldedConcat = \App\Traits\PersianNormalizer::foldSeparatorsSql("CONCAT(f_name, ' ', l_name)");
+29:    /** Issue #819 — see the dashboard's `emptyScope` banner for the rationale. */
+30:    public bool $emptyScope = false;
+37:        $this->emptyScope = app(AccessService::class)->accessibleUnitIds() === [];
+45:    public function validate(string $attribute, mixed $value, Closure $fail): void

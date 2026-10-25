@@ -1,0 +1,17 @@
+name     : livewire/livewire
+descrip. : A front-end framework for Laravel.
+keywords : 
+versions : * v4.4.8
+released : 2026-10-21, this week
+type     : library
+config/livewire.php
+11:    | components like single and multi-file components. The make command will
+12:    | use the first directory in this array to add new component files to.
+16:    'component_locations' => [
+17:        resource_path('views/components'),
+27:    | components like single-file and multi-file components. These folders'll
+28:    | also be referenced when creating new components via the make command.
+32:    'component_namespaces' => [
+40:    | The view that will be used as the layout when rendering a single component as
+46:    'component_layout' => 'components.layouts.app',
+52:    | Livewire allows you to lazy load components that would otherwise slow down

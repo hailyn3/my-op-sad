@@ -1,0 +1,11 @@
+46:        $this->authorize('kargozini');
+68:        $this->authorize('kargozini');
+84:        $this->authorize('kargozini');
+183:    private function assertUnitIdsInScope(array $unitIds): void
+45:    public function accessibleUnitIds(?User $user = null): array
+33:    public static function created(object $subject, string $description = ''): ActivityLog
+31:    public static function parse(?string $date, bool $endOfDay = false): ?Carbon
+283:    public function unitOptions(): array
+374:                        {{-- option-value/option-label required: MaryUI defaults to
+389:                        {{-- option-value/option-label required: MaryUI defaults to
+37:        Permission::firstOrCreate(['name' => 'manage_zabbix', 'label' => 'مدیریت دستگاه‌های زبیکس']);

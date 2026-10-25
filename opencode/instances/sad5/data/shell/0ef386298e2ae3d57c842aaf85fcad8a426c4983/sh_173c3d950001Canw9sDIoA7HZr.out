@@ -1,0 +1,12 @@
+8456acbd Merge pull request #1238 from asgarimehdi/docs/fix-stale-sweep-policy
+943cea6e Merge pull request #1237 from asgarimehdi/docs/remove-location-log
+450e186b docs: fix stale sweep-policy claims after #1231 hard lock
+e8c5fbc7 docs: remove deleted Location Log feature references
+e43e1f60 Merge pull request #1234 from haileen5/syd1
+b2eccdf7 fix(#1231): close the 72 non-core theme contrast cells and lock the matrix
+93f8f747 Merge pull request #1230 from hailyn3/feat/1227-all-daisyui-themes
+f04b7cbd test(#1227): empty the blocking watch list to fit the 30-min E2E cap
+6b5b05f0 test(#1227): re-baseline the blocking watch list against the merged base
+2629459b test(#1227): port #1226 badge probes into the shared sweep runner
+fc59321c feat: enable all 35 daisyUI themes with full sweep infrastructure (#1227)
+a4276fc8 Merge pull request #1228 from hailyn3/fix/1226-badge-solid-contrast

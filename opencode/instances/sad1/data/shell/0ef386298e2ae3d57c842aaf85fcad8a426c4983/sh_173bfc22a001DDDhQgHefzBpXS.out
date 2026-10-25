@@ -1,0 +1,120 @@
+<?php
+
+namespace Tests\Feature;
+
+use Database\Seeders\PermissionSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Session;
+use Tests\Support\Concerns\InteractsWithTestSetup;
+use Tests\TestCase;
+
+/**
+ * یک آیتم منو و مسیرِ همان آیتم باید با «همان» مجوز گیت شوند.
+ *
+ * چرا این تست وجود دارد: قبل از این تغییر چند ناهمخوانی واقعی داشتیم —
+ * `/tools` در منو زیر `bw` رندر می‌شد ولی روتش `manage_users` می‌خواست؛
+ * لینک «کش سرور» بدون هیچ گیتی رندر می‌شد ولی روتش فقط خارج از production
+ * تعریف شده؛ «شبکه‌ها/وایرلس‌ها» زیر `bw` رندر می‌شدند ولی روتشان `map` بود؛
+ * و زیرمنوی «گزارش‌ها» هیچ گیتی نداشت. هر مورد اینجا به‌صورت داده‌ای
+ * (href → مجوزهای لازم) پین می‌شود تا دوباره منحرف نشود.
+ */
+class SidebarPermissionsTest extends TestCase
+{
+    use InteractsWithTestSetup;
+    use RefreshDatabase;
+
+    /**
+     * href در سایدبار → مجوزهایی که باید آن را نشان دهند (هرکدام کافی است).
+     * این نگاشت باید با میدل‌ویر همان مسیر در routes/web.php یکی باشد.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private const LINKS = [
+        '/it/networks' => ['map', 'bw'],
+        '/it/wireless' => ['map', 'bw'],
+        '/it/zabbix-devices' => ['manage_zabbix'],
+        '/tools' => ['manage_users'],
+        '/users' => ['manage_users'],
+        '/activity-log' => ['manage_users'],
+        '/hardware' => ['manage_hardware'],
+        '/maintenance' => ['manage_hardware'],
+        '/reports/units' => ['manage_personnel'],
+        '/reports/persons' => ['manage_personnel'],
+        '/reports/tickets' => ['manage_personnel'],
+        '/maps/unit' => ['map'],
+        '/hr-dashboard' => ['view_hr_dashboard'],
+        '/hr/org-chart' => ['manage_org_chart', 'view_hr_dashboard'],
+        '/kargozini/persons' => ['kargozini', 'manage_personnel'],
+        '/units' => ['organization'],
+        '/todo' => ['calendar'],
+        '/roles' => ['manage_roles'],
+        // Issue #897: /search stays visible to EVERY authenticated account
+        // (no @can on the menu item, no role_or_permission on the route —
+        // units/todos branches serve every in-scope user; only the
+        // tickets/users sections are permission-gated inside the component).
+        // A universal link cannot name "no permission" in this map, so it
+        // lists every known permission: each holder sees it, and the
+        // unrelated-permission loop below stays vacuous. When adding a new
+        // permission to this map, append it here too.
+        '/search' => ['map', 'bw', 'manage_zabbix', 'manage_users', 'manage_hardware', 'manage_personnel', 'view_hr_dashboard', 'manage_org_chart', 'kargozini', 'organization', 'calendar', 'manage_roles'],
+    ];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(PermissionSeeder::class);
+        $this->withoutVite();
+    }
+
+    /**
+     * سایدبار را برای کاربری با مجوزهای داده‌شده رندر و HTML را برمی‌گرداند.
+     */
+    private function sidebarFor(array $permissions, string $env = 'testing'): string
+    {
+        ['user' => $user] = $this->createUserWithUnit($permissions);
+
+        $this->actingAs($user);
+        Session::put('current_unit_name', 'واحد تست');
+
+        $previousEnv = $this->app['env'];
+        $this->app['env'] = $env;
+
+        try {
+            return Blade::render('<x-layouts.app>محتوا</x-layouts.app>');
+        } finally {
+            $this->app['env'] = $previousEnv;
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function permissionPool(): array
+    {
+        return array_values(array_unique(array_merge(...array_values(self::LINKS))));
+    }
+
+    public function test_every_menu_link_needs_the_permission_its_own_route_requires(): void
+    {
+        $htmlPerPermission = [];
+
+        foreach ($this->permissionPool() as $permission) {
+            $htmlPerPermission[$permission] = $this->sidebarFor([$permission]);
+        }
+
+        foreach (self::LINKS as $href => $required) {
+            $needle = 'href="'.$href.'"';
+
+            // دارنده‌ی هر یک از مجوزهای لازم، لینک را می‌بیند…
+            foreach ($required as $permission) {
+                $this->assertStringContainsString(
+                    $needle,
+                    $htmlPerPermission[$permission],
+                    "کاربر با مجوز «{$permission}» باید آیتم «{$href}» را در سایدبار ببیند."
+                );
+            }
+
+            // …و هیچ مجوز بی‌ربطی نباید آن را نشان دهد (لینکِ بی‌دسترسی = ۴۰۳).
+            foreach ($this->permissionPool() as $permission) {
+                if (in_array($permission, $required, true)) {

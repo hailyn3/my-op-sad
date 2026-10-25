@@ -1,0 +1,17 @@
+39:    public bool $isActive = true;
+107:            'isActive' => ['boolean'],
+147:            'responseItemId', 'initialDuration', 'min', 'max', 'sortOrder', 'isActive', 'editingId',
+151:        $this->isActive = true;
+160:            'responseItemId', 'initialDuration', 'min', 'max', 'sortOrder', 'isActive', 'editingId', 'showForm',
+185:        $this->isActive = $device->is_active;
+207:            'is_active' => $this->isActive,
+234:            'is_active' => $this->isActive,
+459:                        <x-toggle wire:model="isActive" label="فعال" />
+===
+143:        $this->authorize('manage_zabbix');
+168:        $this->authorize('manage_zabbix');
+191:        $this->authorize('manage_zabbix');
+216:        $this->authorize('manage_zabbix');
+243:        $this->authorize('manage_zabbix');
+257:        $this->authorize('manage_zabbix');
+282:        $this->authorize('manage_zabbix');

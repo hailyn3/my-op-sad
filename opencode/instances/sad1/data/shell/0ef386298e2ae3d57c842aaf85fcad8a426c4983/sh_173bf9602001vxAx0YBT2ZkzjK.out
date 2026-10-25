@@ -1,0 +1,234 @@
+    })->name('test.safe-route');
+}
+
+// Protected routes here
+Route::middleware('auth')->group(function () {
+    Route::livewire('/select-context', 'select-context');
+
+    Route::middleware('unit_context')->group(function () {
+        Route::redirect('/', '/dashboard');
+        Route::livewire('/dashboard', 'dashboard');
+
+        Route::middleware('role_or_permission:manage_users')->group(function () {
+            Route::livewire('/users', 'users.index');
+        });
+        Route::livewire('/users/changepassword', 'auth.changepassword');
+
+        Route::middleware('role_or_permission:organization')->group(function () {
+            Route::livewire('/units', 'units.index');
+            Route::get('/units/export', [UnitsExportController::class, 'export'])->name('units.export');
+            Route::livewire('/units/chart', 'units.chart');
+            Route::livewire('/units/{id}/map', 'units.map');
+        });
+
+        // ... more
+
+        Route::middleware('role_or_permission:kargozini')->group(function () {
+            Route::livewire('/kargozini/estekhdams', 'kargozini.estekhdam');
+            Route::livewire('/kargozini/tahsils', 'kargozini.tahsil');
+            Route::livewire('/kargozini/semats', 'kargozini.semat');
+            Route::livewire('/kargozini/radifs', 'kargozini.radif');
+        });
+
+        // پرسنل — تصمیم ایشو #775: خواندن (لیست + خروجی) با unionـِ `kargozini`
+        // و `manage_personnel` است (هر دو حوزه‌ی پرسنل‌اند و دارنده‌ی هرکدام
+        // نباید لینک کور ببیند)، ولی نوشتن (import) فقط `manage_personnel`
+        // می‌خواهد — هم‌راستا با API که برای write همین را می‌خواهد. جداول
+        // lookup بالا فقط `kargozini` می‌مانند.
+        Route::middleware('role_or_permission:kargozini|manage_personnel')->group(function () {
+            Route::livewire('/kargozini/persons', 'kargozini.person');
+            Route::get('/kargozini/persons/export', [PersonsExportController::class, 'export'])->name('kargozini.persons.export');
+        });
+===ROLESEEDER===
+<?php
+
+namespace Database\Seeders;
+
+// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\User;
+use Illuminate\Database\Seeder;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
+
+class RoleSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // Reset cached roles and permissions
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+
+        // ۱. ایجاد نقش مدیر کل و اختصاص تمام مجوزها
+        // firstOrCreate: PermissionSeeder may already have created `admin`
+        $adminRole = Role::firstOrCreate(
+            ['name' => 'admin', 'guard_name' => 'web'],
+            ['label' => 'مدیر کل']
+        );
+        $adminRole->syncPermissions(Permission::all());
+
+        // ۲. ایجاد نقش مدیر واحد
+        $managerRole = Role::firstOrCreate(
+            ['name' => 'unit_manager', 'guard_name' => 'web'],
+            ['label' => 'مدیر واحد']
+        );
+        $managerRole->syncPermissions([
+            'create_ticket',
+            'manage_unit_tickets',
+            'view_assigned_tickets',
+            'organization',
+            // گزارش‌ها (routes/web.php) — مدیر واحد قبلاً گزارش‌ها را در منو
+            // می‌دید (بدون هیچ گیتی)؛ اکنون که روت پشت `manage_personnel` است
+            // این مجوز را می‌گیرد تا دسترسی‌اش از دست نرود.
+            'manage_personnel',
+        ]);
+
+        // ۳. ایجاد نقش کارشناس واحد
+        $expertRole = Role::firstOrCreate(
+            ['name' => 'expert', 'guard_name' => 'web'],
+            ['label' => 'کارشناس واحد']
+        );
+        $expertRole->syncPermissions([
+            'create_ticket',
+            'view_assigned_tickets',
+        ]);
+
+        // ۴. ایجاد نقش کاربر عادی
+        $userRole = Role::firstOrCreate(
+            ['name' => 'user', 'guard_name' => 'web'],
+            ['label' => 'کاربر']
+        );
+        $userRole->syncPermissions([
+            'create_ticket',
+        ]);
+
+        // Assign roles to demo users
+        $superadmins = User::whereIn('id', [1, 2, 3])->get();
+
+        foreach ($superadmins as $user) {
+            $user->assignRole('admin');
+        }
+    }
+}
+===INTERACTS===
+<?php
+
+namespace Tests\Support\Concerns;
+
+use App\Models\Hardware;
+use App\Models\Person;
+use App\Models\Unit;
+use App\Models\User;
+use Closure;
+use Database\Factories\EstekhdamFactory;
+use Database\Factories\RadifFactory;
+use Database\Factories\SematFactory;
+use Database\Factories\TahsilFactory;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Str;
+
+trait InteractsWithTestSetup
+{
+    /**
+     * Seed all four lookup tables with a deterministic row at id=1 and resync
+     * Postgres sequences. Call this in setUp() instead of raw DB::table()->insert() + setval().
+     *
+     * Tests hardcode lookup FKs as 1 (t_id/e_id/s_id/r_id => 1). Postgres
+     * sequences are NOT transactional: RefreshDatabase rolls back each test's
+     * rows but the sequence keeps advancing, so an auto-incremented factory row
+     * gets id=2,3,… on later tests and the hardcoded FKs break. Forcing id=1
+     * restores the contract on every test.
+     */
+    protected function seedLookupTables(): void
+    {
+        $lookups = [
+            'tahsils' => TahsilFactory::class,
+            'estekhdams' => EstekhdamFactory::class,
+            'semats' => SematFactory::class,
+            'radifs' => RadifFactory::class,
+        ];
+
+        foreach ($lookups as $table => $factory) {
+            if (! DB::table($table)->where('id', 1)->exists()) {
+                $factory::new()->create(['id' => 1]);
+            }
+
+            // Resync sequence so later insertGetId() calls skip id=1.
+            $this->resyncSequence($table);
+        }
+    }
+
+    /**
+     * Resync a Postgres sequence to MAX(id) to avoid duplicate-key errors
+     * after manual inserts with explicit IDs.
+     */
+    protected function resyncSequence(string $table): void
+    {
+        DB::statement("SELECT setval('{$table}_id_seq', COALESCE((SELECT MAX(id) FROM {$table}), 1))");
+    }
+
+    /**
+     * Create a user with a unit using factories.
+     *
+     * @param  array<string>  $permissions  Spatie permission names to grant
+     * @param  string|null  $role  Spatie role name to assign (optional)
+     * @return array{user: User, unit: Unit}
+     */
+    protected function createUserWithUnit(array $permissions = [], ?string $role = null): array
+    {
+        $unit = Unit::factory()->create();
+        $person = Person::factory()->create(['u_id' => $unit->id]);
+        $user = User::factory()->create(['n_code' => $person->n_code]);
+
+        if ($role) {
+            $user->assignRole($role);
+        }
+
+        if ($permissions) {
+            $user->givePermissionTo($permissions);
+        }
+
+        $user->units()->attach($unit->id, ['role' => 'staff', 'is_primary' => true]);
+        Session::put('current_unit_id', $unit->id);
+
+        return ['user' => $user, 'unit' => $unit];
+    }
+
+    protected function createHardware(array $data = []): Hardware
+    {
+        return Hardware::factory()->create($data);
+    }
+
+    protected function assertCacheInvalidated(string $cacheKey): void
+    {
+        $versionBefore = Cache::get($cacheKey.'_version', 0);
+        $this->createHardware(['pc_name' => 'Cache-Invalidate-Test']);
+        $versionAfter = Cache::get($cacheKey.'_version', 0);
+        $this->assertGreaterThan($versionBefore, $versionAfter, "Cache key '{$cacheKey}' was not invalidated.");
+    }
+
+    protected function assertQueryCount(int $expected, Closure $callback): void
+    {
+        $count = 0;
+        DB::listen(function ($query) use (&$count) {
+            if (! Str::startsWith($query->sql, ['BEGIN', 'COMMIT', 'ROLLBACK', 'SAVEPOINT'])) {
+                $count++;
+            }
+        });
+        $callback();
+        $this->assertLessThanOrEqual($expected, $count, "Expected ≤ {$expected} queries, got {$count}");
+    }
+
+    protected function assertNoNPlusOne(Closure $callback, int $maxQueries = 5): void
+    {
+        $count = 0;
+        DB::listen(function ($query) use (&$count) {
+            if (! Str::startsWith($query->sql, ['BEGIN', 'COMMIT', 'ROLLBACK', 'SAVEPOINT'])) {
+                $count++;
+            }
+        });
+        $callback();
+        $this->assertLessThanOrEqual($maxQueries, $count, "N+1 detected: {$count} queries");
+    }
+}

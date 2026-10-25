@@ -1,0 +1,69 @@
+<?php
+
+namespace App\Models;
+
+use App\Services\CacheInvalidationServiceInterface;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
+
+/**
+ * A monitored Zabbix device (issue #698) — replaces the item-ID arrays that
+ * used to be hardcoded in `it/networks` and `it/wireless`.
+ *
+ * @property int $id
+ * @property string $name
+ * @property string $type
+ * @property string|null $out_item_id
+ * @property string|null $in_item_id
+ * @property string|null $signal_item_id
+ * @property string|null $frequency_item_id
+ * @property string|null $response_item_id
+ * @property int $initial_duration
+ * @property float|null $min
+ * @property float|null $max
+ * @property int $sort_order
+ * @property bool $is_active
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ *
+ * @method static Builder<static> active()
+ * @method static Builder<static> ordered()
+ * @method static Builder<static> ofType(string $type)
+ * @method static Builder<static> where(string $column, mixed $value)
+ */
+class ZabbixDevice extends Model
+{
+    use HasFactory;
+
+    public const TYPE_NETWORK = 'network';
+
+    public const TYPE_WIRELESS = 'wireless';
+
+    /** Cache namespace holding the rendered device lists (see issue #698). */
+    public const CACHE_NAMESPACE = 'zabbix_devices';
+
+    protected $fillable = [
+        'name',
+        'type',
+        'out_item_id',
+        'in_item_id',
+        'signal_item_id',
+        'frequency_item_id',
+        'response_item_id',
+        'initial_duration',
+        'min',
+        'max',
+        'sort_order',
+        'is_active',
+    ];
+===SELECT===
+resources/views/livewire/users/index.blade.php:684:                            option-value="id"
+resources/views/livewire/users/index.blade.php:697:                            option-value="name"
+resources/views/livewire/settings/index.blade.php:186:                              option-value="value" option-label="label" class="mt-1" />
+resources/views/livewire/settings/index.blade.php:191:                              option-value="value" option-label="label" class="mt-1" />
+resources/views/livewire/roles/index.blade.php:211:                option-value="name"
+resources/views/livewire/maintenance/index.blade.php:158:     * گزینه‌های فیلد «دوره» — کلیدها با option-value/option-label هم‌خوان‌اند.
+resources/views/livewire/maintenance/index.blade.php:277:     * option-value/option-label بگیرد: پیش‌فرض MaryUI روی 'id'/'name'
+resources/views/livewire/maintenance/index.blade.php:374:                        {{-- option-value/option-label required: MaryUI defaults to

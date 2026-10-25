@@ -1,0 +1,7 @@
+8456acbd Merge pull request #1238 from asgarimehdi/docs/fix-stale-sweep-policy
+943cea6e Merge pull request #1237 from asgarimehdi/docs/remove-location-log
+450e186b docs: fix stale sweep-policy claims after #1231 hard lock
+8456acbd
+---
+Spec: Disease Registration & Disease Map System (سامانه ثبت بیماری و نقشه بیماری‌ها)
+26285

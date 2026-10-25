@@ -1,0 +1,46 @@
+77:    Route::middleware('unit_context')->group(function () {
+86:        Route::middleware('role_or_permission:organization')->group(function () {
+98:            Route::livewire('/kargozini/semats', 'kargozini.semat');
+128:        Route::middleware('role_or_permission:map')->group(function () {
+145:        Route::middleware('role_or_permission:map|bw')->group(function () {
+220:    }); // unit_context
+===
+16:        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+19:        Permission::firstOrCreate(['name' => 'kargozini', 'label' => 'کارگزینی']);
+20:        Permission::firstOrCreate(['name' => 'map', 'label' => 'نقشه']);
+21:        Permission::firstOrCreate(['name' => 'organization', 'label' => 'ساختار سازمانی']);
+22:        Permission::firstOrCreate(['name' => 'op-cache', 'label' => 'دسترسی به کش سرور']);
+23:        Permission::firstOrCreate(['name' => 'bw', 'label' => 'آنالیز شبکه']);
+25:        Permission::firstOrCreate(['name' => 'view_all_tickets', 'label' => 'مشاهده مانیتورینگ کل تیکت‌ها']);
+26:        Permission::firstOrCreate(['name' => 'create_ticket', 'label' => 'ثبت تیکت جدید']);
+27:        Permission::firstOrCreate(['name' => 'manage_unit_tickets', 'label' => 'مدیریت و ارجاع تیکت‌های واحد']);
+28:        Permission::firstOrCreate(['name' => 'view_assigned_tickets', 'label' => 'مشاهده تیکت‌های ارجاع شده به خود']);
+30:        Permission::firstOrCreate(['name' => 'calendar', 'label' => 'تقویم کارها']);
+32:        Permission::firstOrCreate(['name' => 'manage_users', 'label' => 'مدیریت کاربران']);
+33:        Permission::firstOrCreate(['name' => 'manage_roles', 'label' => 'مدیریت نقش‌ها و دسترسی‌ها']);
+35:        Permission::firstOrCreate(['name' => 'manage_hardware', 'label' => 'شناسنامه سخت افزار']);
+37:        Permission::firstOrCreate(['name' => 'manage_zabbix', 'label' => 'مدیریت دستگاه‌های زبیکس']);
+39:        Permission::firstOrCreate(['name' => 'view_hr_dashboard', 'label' => 'مشاهده داشبورد منابع انسانی']);
+40:        Permission::firstOrCreate(['name' => 'manage_personnel', 'label' => 'مدیریت پرسنل']);
+41:        Permission::firstOrCreate(['name' => 'manage_org_chart', 'label' => 'مدیریت چارت سازمانی']);
+43:        Permission::firstOrCreate(['name' => 'test-permission', 'label' => 'تست مجوز']);
+45:        // each had to firstOrCreate it; centralizing here keeps that convention
+49:        // full access (issue #698: manage_zabbix).
+50:        $adminRole = Role::firstOrCreate(
+55:        // givePermissionTo (not syncPermissions) — sync would REPLACE every
+58:        $adminRole->givePermissionTo('manage_zabbix');
+62:        $adminRole->givePermissionTo('manage_personnel');
+64:        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+===
+20:        // firstOrCreate: PermissionSeeder may already have created `admin`
+21:        $adminRole = Role::firstOrCreate(
+25:        $adminRole->syncPermissions(Permission::all());
+28:        $managerRole = Role::firstOrCreate(
+32:        $managerRole->syncPermissions([
+44:        $expertRole = Role::firstOrCreate(
+48:        $expertRole->syncPermissions([
+54:        $userRole = Role::firstOrCreate(
+58:        $userRole->syncPermissions([
+===
+database/migrations/2026_09_06_000003_add_trigram_indexes_to_hardware_and_persons.php:13:            DB::statement("CREATE INDEX IF NOT EXISTS idx_hardware_{$column}_trgm ON hardwares USING gin ({$column} gin_trgm_ops)");
+database/migrations/2026_09_06_000003_add_trigram_indexes_to_hardware_and_persons.php:19:            DB::statement("CREATE INDEX IF NOT EXISTS idx_persons_{$column}_trgm ON persons USING gin ({$column} gin_trgm_ops)");

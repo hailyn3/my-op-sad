@@ -1,0 +1,106 @@
+<?php
+
+use App\Models\ZabbixDevice;
+use App\Services\ZabbixService;
+use App\Traits\PersianNormalizer;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Livewire\Component;
+use Livewire\WithPagination;
+use Mary\Traits\Toast;
+
+return new class extends Component
+{
+    use Toast;
+    use WithPagination;
+
+    // ── form state ──
+    public string $name = '';
+
+    public string $type = ZabbixDevice::TYPE_NETWORK;
+
+    public ?string $outItemId = null;
+
+    public ?string $inItemId = null;
+
+    public ?string $signalItemId = null;
+
+    public ?string $frequencyItemId = null;
+
+    public ?string $responseItemId = null;
+
+    public int $initialDuration = 7200;
+
+    public ?float $min = null;
+
+    public ?float $max = null;
+
+    public int $sortOrder = 0;
+
+    public bool $isActive = true;
+
+    // ── ui state ──
+    public ?int $editingId = null;
+
+    public bool $showForm = false;
+
+    public string $search = '';
+
+    public int $perPage = 20;
+
+    /**
+     * #914: the shape is client-settable, so the keys may be absent or
+     * unknown at runtime — `array{column, direction}` would only describe
+     * the default, and every read below has to stay `??`-guarded.
+     *
+     * @var array<string, string>
+     */
+    public array $sortBy = ['column' => 'sort_order', 'direction' => 'asc'];
+
+    /**
+     * نتیجه آخرین «تست اتصال» به ازای هر دستگاه.
+===
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\ActivityLog;
+use App\Models\Person;
+use App\Models\Unit;
+use App\Models\User;
+use Database\Seeders\PermissionSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
+use Livewire\Livewire;
+use Morilog\Jalali\Jalalian;
+use Tests\Support\Concerns\InteractsWithTestSetup;
+use Tests\TestCase;
+
+covers(ActivityLog::class);
+
+class ActivityLogPageLivewireTest extends TestCase
+{
+    use InteractsWithTestSetup;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(PermissionSeeder::class);
+        $this->seedLookupTables();
+    }
+
+    // ==================== Page load / auth ====================
+
+    public function test_activity_log_page_loads_for_authorized_user(): void
+    {
+        ['user' => $user] = $this->createUserWithUnit();
+        $user->givePermissionTo('manage_users');
+        $this->actingAs($user);
+
+        Livewire::test('activity-log.index')
+            ->assertStatus(200);
+    }
+
+    public function test_guest_redirected_from_activity_log(): void
+    {
+        $this->get('/activity-log')->assertRedirect('/login');

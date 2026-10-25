@@ -1,0 +1,83 @@
+11:Route::livewire('/login', 'auth.login')->name('login');
+31:    Route::livewire('/hardware', 'hardware.index');
+32:    Route::livewire('/hardware/import', 'hardware.import-hardware.import-hardware')->name('hardware.import');
+34:    Route::livewire('/maintenance', 'maintenance.index')->name('maintenance.index');
+38:// Route::livewire('/register', 'auth.register')->name('register');
+75:    Route::livewire('/select-context', 'select-context');
+79:        Route::livewire('/dashboard', 'dashboard');
+82:            Route::livewire('/users', 'users.index');
+84:        Route::livewire('/users/changepassword', 'auth.changepassword');
+87:            Route::livewire('/units', 'units.index');
+89:            Route::livewire('/units/chart', 'units.chart');
+90:            Route::livewire('/units/{id}/map', 'units.map');
+96:            Route::livewire('/kargozini/estekhdams', 'kargozini.estekhdam');
+97:            Route::livewire('/kargozini/tahsils', 'kargozini.tahsil');
+98:            Route::livewire('/kargozini/semats', 'kargozini.semat');
+99:            Route::livewire('/kargozini/radifs', 'kargozini.radif');
+108:            Route::livewire('/kargozini/persons', 'kargozini.person');
+113:            Route::livewire('/kargozini/persons/import', 'kargozini.import-persons.import-persons')->name('kargozini.persons.import');
+118:            Route::livewire('/hr-dashboard', 'hr.dashboard')->name('hr.dashboard');
+125:            Route::livewire('/hr/org-chart', 'hr.org-chart')->name('hr.org-chart');
+129:            Route::livewire('/maps/route', 'maps/route');
+130:            Route::livewire('/maps/route2', 'maps/route2');
+131:            Route::livewire('/maps/county', 'maps/county');
+132:            Route::livewire('/maps/unit', 'maps/unit');
+133:            Route::livewire('/maps/point', 'maps/point');
+136:            Route::livewire('/map', 'map.map-dashboard')->name('map');
+146:            Route::livewire('/it/wireless', 'it/wireless');
+147:            Route::livewire('/it/networks', 'it/networks');
+153:            Route::livewire('/it/zabbix-devices', 'it/zabbix-devices')->name('it.zabbix-devices');
+157:            Route::livewire('/todo', 'todo.todo');
+161:            Route::livewire('/monitoring', 'tickets.monitoring')->name('tickets.monitoring');
+166:                Route::livewire('/new', 'tickets.create')->name('create');
+169:                Route::livewire('/inbox', 'tickets.inbox')->name('inbox');
+174:            Route::livewire('/activity-log', 'activity-log.index')->name('activity-log');
+178:            Route::livewire('/permissions', 'permissions/index')->name('permissions');
+179:            Route::livewire('/roles', 'roles/index')->name('roles');
+197:        Route::livewire('/search', 'search.index')->name('search');
+204:            Route::livewire('/reports/tickets', 'reports.advanced')->name('reports.tickets');
+205:            Route::livewire('/reports/units', 'reports.units')->name('reports.units');
+206:            Route::livewire('/reports/todos', 'reports.todos')->name('reports.todos');
+---
+AccessServiceMemoizationTest.php
+AccessServiceTest.php
+Accessibility
+AccessibilityInfrastructureTest.php
+ActivityLogDetailScopeTest.php
+ActivityLogModelTest.php
+ActivityLogPageLivewireTest.php
+ActivityLogPageTest.php
+ActivityLogServiceTest.php
+ApiAbilityTest.php
+ApiLoginTest.php
+ApiLogoutTest.php
+ApiRateLimitTest.php
+AppKeyGuardWiringTest.php
+AppKeyLeakGuardTest.php
+ArchiveOldRecordsCommandTest.php
+Auth
+AuthTest.php
+BoundaryModelTest.php
+CacheInvalidationTest.php
+ChangePasswordTest.php
+CompletedAtIndexTest.php
+CoverageReportComponentTableTest.php
+CycleGuardDeadlineTest.php
+DailySeriesBetweenRangeTest.php
+DashboardPageTest.php
+DashboardPriorityBucketsTest.php
+DashboardTicketChartTest.php
+DashboardTodoNotificationTest.php
+DeleteAlreadyDeletedTodoTest.php
+EnvSecretGuardTest.php
+ExcelFormulaEscapeTest.php
+GenerateDailyReportsCommandTest.php
+GenerateDueMaintenanceCommandTest.php
+GenerateRecurringTodosCommandTest.php
+GeocodingFetchMigrationTest.php
+GisApiTest.php
+GitHooksTest.php
+HardwareApiTest.php
+HardwareAuditChangesNormalizationMigrationTest.php
+---
+tests/Support/Concerns/InteractsWithTestSetup.php

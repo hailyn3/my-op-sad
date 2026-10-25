@@ -1,0 +1,13 @@
+resources/views/livewire/roles/index.blade.php:32:    public function mount(): void
+resources/views/livewire/roles/index.blade.php-33-    {
+resources/views/livewire/roles/index.blade.php-34-        $this->authorize('manage_roles');
+resources/views/livewire/roles/index.blade.php-35-
+resources/views/livewire/roles/index.blade.php-36-        // اضافه کردن label به فیلدهای انتخابی
+resources/views/livewire/roles/index.blade.php-37-        $this->allPermissions = Permission::all(['id', 'name', 'label'])->toArray();
+resources/views/livewire/roles/index.blade.php-38-
+resources/views/livewire/roles/index.blade.php-39-        $this->headers = [
+resources/views/livewire/roles/index.blade.php-40-            ['key' => 'id', 'label' => '#', 'class' => 'w-1 hidden sm:table-cell'],
+resources/views/livewire/roles/index.blade.php-41-            ['key' => 'label', 'label' => 'عنوان', 'class' => 'flex-1'],
+resources/views/livewire/roles/index.blade.php-42-            ['key' => 'name', 'label' => 'نام', 'class' => 'flex-1'],
+resources/views/livewire/roles/index.blade.php-43-        ];
+resources/views/livewire/roles/index.blade.php-44-    }

@@ -1,0 +1,27 @@
+            ]);
+
+            if ($this->completionFiles) {
+                foreach ($this->completionFiles as $file) {
+                    $path = $file->store('attachments', 'public');
+                    $ticket->attachments()->create([
+                        'user_id' => auth()->id(),
+                        'activity_id' => $newActivity->id,
+---
+
+        if ($this->files) {
+            foreach ($this->files as $file) {
+                $path = $file->store('attachments', 'public');
+                $ticket->attachments()->create([
+                    'user_id' => auth()->id(),
+---
+                <div class="mt-4 flex flex-wrap gap-2 border-t border-base-300 pt-4">
+                    @foreach($initialFiles as $file)
+                    <x-button :label="$file->file_name" icon="o-paper-clip" link="{{ asset('storage/' . $file->file_path) }}"
+                        class="btn-xs btn-outline" external target="_blank" />
+                    @endforeach
+---
+                <div class="mt-4 flex flex-wrap gap-2 border-t border-base-300 pt-4">
+                    @foreach($initialFiles as $file)
+                    <x-button :label="$file->file_name" icon="o-arrow-down-tray" link="{{ Storage::url($file->file_path) }}"
+                        class="btn-xs btn-outline" external target="_blank" />
+                    @endforeach

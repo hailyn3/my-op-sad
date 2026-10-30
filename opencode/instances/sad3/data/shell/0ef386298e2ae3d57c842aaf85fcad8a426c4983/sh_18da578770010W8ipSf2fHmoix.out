@@ -1,0 +1,45 @@
+<?php
+
+namespace Tests\Feature;
+
+use Tests\TestCase;
+
+/**
+ * Issue #953 — the guard must actually RUN, in both homes.
+ *
+ * `scripts/check-app-key-leak.php` alone changes nothing: a guard nothing
+ * invokes is documentation with a shebang. Step 3 of the issue asks for a
+ * failing job, and there are exactly two places that can fail a run —
+ * `scripts/verify.sh` (which `composer verify` runs before every push) and the
+ * `lint` job in `.github/workflows/test.yml`. `scripts/verify.sh` alone is not
+ * enough: CI never runs it (its jobs are `lint`, `test`, `coverage-report`,
+ * `mutation`, `phpstan`), so a guard living only there fails no job.
+ *
+ * These assertions cover the wiring only — the guard's own behaviour is
+ * `AppKeyLeakGuardTest`'s subject.
+ */
+class AppKeyGuardWiringTest extends TestCase
+{
+    /**
+     * Throwaway directory for the index-copy fixture. Never inside the
+     * repository: `GIT_INDEX_FILE` resolves relative paths against the git
+     * working directory, so a sandbox inside the tree would be ambiguous.
+     */
+    private string $sandbox = '';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->sandbox = sys_get_temp_dir().'/app-key-wiring-'.bin2hex(random_bytes(6));
+
+        mkdir($this->sandbox, 0o777, true);
+    }
+
+    protected function tearDown(): void
+    {
+===
+/home/runner/h-dashboard/resources/css/app.css:4:@source '../../storage/framework/views/*.php';
+/home/runner/h-dashboard/resources/views/livewire/tickets/⚡inbox.blade.php:614:                    <x-button :label="$file->file_name" icon="o-paper-clip" link="{{ asset('storage/' . $file->file_path) }}"
+/home/runner/h-dashboard/resources/views/livewire/tickets/⚡inbox.blade.php:639:                                <x-ui.icon-button name="دانلود پیوست" icon="o-arrow-down-tray" link="{{ asset('storage/' . $actFile->file_path) }}"
+/home/runner/h-dashboard/resources/views/livewire/tickets/⚡create.blade.php:154:            // ceiling, into `public/storage/attachments`. Validate in the

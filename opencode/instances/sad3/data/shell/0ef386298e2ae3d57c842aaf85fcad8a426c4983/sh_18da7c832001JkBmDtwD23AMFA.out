@@ -1,0 +1,33 @@
+        "test": [
+            "Composer\\Config::disableProcessTimeout",
+            "php scripts/ensure-test-app-key.php && php artisan config:clear && php artisan route:clear && XDEBUG_MODE=off php artisan test"
+#!/usr/bin/env bash
+# composer verify — local feedback that matches CI's test job before you push.
+#
+# 1. preflight  — fails fast (exit 2) if this machine cannot run the suite the
+#                 way CI does, BEFORE anything destructive runs
+# 1b. APP_KEY   — fails if a tracked env file commits a real APP_KEY (#953)
+# 2. caches     — `composer test` already clears config/routes; view:clear is
+#                 the one CI does that composer test does not, so add it here
+# 3. pint       — `pint --test`, the exact command CI's lint job runs
+# 3b. dead files— no test file may run zero tests (issue #935)
+# 3c. lookup seed— no test file may hand-roll lookup seeding (issue #1044)
+# 4. phpstan    — level 6 with the committed baseline, the exact CI command
+# 5. pest       — the full suite, or the paths given as arguments
+#
+# This reproduces the CI *test job*, not its coverage gate: CI also runs
+# `--parallel --coverage --min=80`, which needs pcov and a parallel-capable
+# machine. Coverage is deliberately not gated locally.
+#
+# Usage:
+#   composer verify                     # everything
+#   composer verify tests/Feature/X.php  # only the tests you touched
+set -uo pipefail
+
+cd "$(dirname "$0")/.."
+
+# 0 = fine, 2 = the environment is not fit to run the suite.
+readonly EXIT_PRECONDITION_FAILED=2
+
+# Xdebug in develop mode makes every date error a fatal; AGENTS.md records it.
+export XDEBUG_MODE=off

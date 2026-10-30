@@ -1,7 +1,0 @@
-total 1.7M
--rw-r--r-- 1 runner runner 390K Oct 21 14:48 dashboard.png
--rw-r--r-- 1 runner runner 487K Oct 21 14:47 login.png
--rw-r--r-- 1 runner runner 802K Oct 21 14:48 routing-font.png
-/tmp/opencode/screens/dashboard.png:    PNG image data, 1440 x 900, 8-bit/color RGB, non-interlaced
-/tmp/opencode/screens/login.png:        PNG image data, 1440 x 940, 8-bit/color RGB, non-interlaced
-/tmp/opencode/screens/routing-font.png: PNG image data, 1440 x 900, 8-bit/color RGB, non-interlaced

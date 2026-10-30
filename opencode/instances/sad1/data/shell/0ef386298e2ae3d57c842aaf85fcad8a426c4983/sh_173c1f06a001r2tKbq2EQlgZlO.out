@@ -1,4 +1,0 @@
-66:    protected function createUserWithUnit(array $permissions = [], ?string $role = null): array
-33:    private const LINKS = [
-60:        '/search' => ['map', 'bw', 'manage_zabbix', 'manage_users', 'manage_hardware', 'manage_personnel', 'view_hr_dashboard', 'manage_org_chart', 'kargozini', 'organization', 'calendar', 'manage_roles'],
-42:    public function delete(Semat $semat): void

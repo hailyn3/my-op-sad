@@ -1,3 +1,0 @@
-3304:  [90mTests:[39m    [31;1m1 failed[39;22m[90m,[39m[39m [39m[33;1m2 risky[39;22m[90m,[39m[39m [39m[32;1m2684 passed[39;22m[90m (8798 assertions)[39m
-206:  [33;1m![39;22m[90m [39m[90mbulk mark empty shows error[39m[90m [39m[33m→ This test did not perform any asserti[39m[90m…[39m [90m0.11s[39m  
-214:  [33;1m![39;22m[90m [39m[90mbulk delete empty does nothing[39m[90m [39m[33m→ This test did not perform any asse[39m[90m…[39m [90m0.10s[39m  

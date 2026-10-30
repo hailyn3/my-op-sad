@@ -1,2 +1,0 @@
-resources/views/livewire/hardware/table.blade.php:40:                <x-button icon="o-clock" wire:click="loadHistory({{ $hw['id'] }})" class="btn-ghost btn-xs text-info flex-1" label="تاریخچه" />
-resources/views/livewire/hardware/table.blade.php:74:                <x-ui.icon-button name="تاریخچه سخت‌افزار" icon="o-clock" wire:click="loadHistory({{ $hw['id'] }})" class="btn-ghost btn-sm text-info" />
